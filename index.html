@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Animap</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #171a23ee;
+    --panel-solid: #171a23;
+    --line: #2a2f3d;
+    --text: #e8e6e3;
+    --muted: #8b90a0;
+    --accent: #ffb454;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+  canvas.dragging { cursor: grabbing; }
+  canvas.pointing { cursor: pointer; }
+
+  #search { position: fixed; top: 16px; left: 16px; width: min(380px, calc(100vw - 32px)); z-index: 3; }
+  #search input { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-solid); color: var(--text); font-size: 15px; outline: none; }
+  #search input:focus { border-color: var(--accent); }
+  #results { margin-top: 6px; background: var(--panel-solid); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: none; }
+  #results.open { display: block; }
+  .result { display: flex; gap: 10px; align-items: center; padding: 8px 10px; cursor: pointer; }
+  .result:hover, .result.active { background: #ffffff10; }
+  .result img { width: 32px; height: 45px; object-fit: cover; border-radius: 4px; background: #222; flex: none; }
+  .result .name { font-weight: 600; }
+  .result .sub { color: var(--muted); font-size: 12px; }
+
+  #panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(380px, 100vw); background: var(--panel); backdrop-filter: blur(8px); border-left: 1px solid var(--line); z-index: 4; overflow-y: auto; transform: translateX(100%); transition: transform .25s ease; }
+  #panel.open { transform: none; }
+  #panel .close { position: absolute; top: 10px; right: 12px; background: none; border: 0; color: var(--muted); font-size: 22px; cursor: pointer; }
+  .hero { display: flex; gap: 14px; padding: 20px 20px 12px; }
+  .hero img { width: 92px; height: 130px; object-fit: cover; border-radius: 6px; background: #222; flex: none; }
+  .hero h2 { margin: 0 0 4px; font-size: 18px; line-height: 1.25; padding-right: 18px; }
+  .hero .alt { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+  .meta { color: var(--muted); font-size: 12px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 20px 12px; }
+  .chip { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: #ffffff12; color: #cfd2da; }
+  .section { padding: 8px 20px 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); border-top: 1px solid var(--line); margin-top: 4px; }
+  .sim { display: flex; gap: 10px; align-items: center; padding: 6px 20px; cursor: pointer; }
+  .sim:hover { background: #ffffff0d; }
+  .sim img { width: 34px; height: 48px; object-fit: cover; border-radius: 4px; background: #222; flex: none; }
+  .sim .body { flex: 1; min-width: 0; }
+  .sim .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar { height: 3px; border-radius: 2px; background: var(--line); margin-top: 4px; }
+  .bar span { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
+  a { color: var(--accent); }
+
+  #tooltip { position: fixed; pointer-events: none; z-index: 5; background: var(--panel-solid); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-width: 280px; display: none; }
+  #tooltip .name { font-weight: 600; }
+  #tooltip .sub { color: var(--muted); font-size: 12px; }
+
+  #hint { position: fixed; left: 16px; bottom: 14px; color: var(--muted); font-size: 12px; z-index: 2; }
+  #error { position: fixed; inset: 0; display: none; place-items: center; text-align: center; color: var(--muted); padding: 16px; }
+</style>
+</head>
+<body>
+<canvas id="map"></canvas>
+
+<div id="search">
+  <input id="q" type="search" placeholder="Search an anime you like…" autocomplete="off" spellcheck="false">
+  <div id="results"></div>
+</div>
+
+<aside id="panel" aria-live="polite"></aside>
+<div id="tooltip"></div>
+<div id="hint">Scroll to zoom · drag to pan · click a show to see similar ones</div>
+<div id="error">Couldn't find map data. Run <code>uv run reduce.py</code> to create animap.js next to this file.</div>
+
+<script src="animap.js"></script>
+<script>
+"use strict";
+
+const data = window.ANIMAP;
+if (!data) {
+  document.getElementById("error").style.display = "grid";
+  throw new Error("animap.js missing");
+}
+const points = data.points;
+const clusters = data.clusters;
+
+// ---------- colours ----------
+
+const palette = ["#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4", "#46f0f0", "#f032e6", "#bcf60c", "#fabebe", "#008080", "#e6beff", "#9a6324", "#fffac8", "#aaffc3", "#808000", "#ffd8b1", "#7f8cff", "#ff6f91", "#5fd3a5"];
+function clusterColour(c) {
+  if (c < 0) return "#6b7080";
+  return palette[c % palette.length];
+}
+for (const p of points) {
+  p.colour = clusterColour(p.cluster >= 0 ? p.cluster : p.soft);
+  p.faded = p.cluster < 0;
+}
+
+// ---------- view transform ----------
+
+const canvas = document.getElementById("map");
+const ctx = canvas.getContext("2d");
+let width = 0, height = 0, dpr = 1;
+const view = { x: 500, y: 500, scale: 1 };
+let homeScale = 1;
+
+const maxPop = Math.max(...points.map(p => p.popularity));
+for (const p of points) p.r = 2.5 + 7 * Math.sqrt(p.popularity / maxPop);
+
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  width = canvas.clientWidth;
+  height = canvas.clientHeight;
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  draw();
+}
+
+// Frame the middle 96% of shows so a few far-off islands don't shrink the view.
+function fitAll() {
+  const pct = (arr, q) => arr[Math.floor(q * (arr.length - 1))];
+  const xs = points.map(p => p.x).sort((a, b) => a - b), ys = points.map(p => p.y).sort((a, b) => a - b);
+  const minX = pct(xs, 0.02), maxX = pct(xs, 0.98), minY = pct(ys, 0.02), maxY = pct(ys, 0.98);
+  view.x = (minX + maxX) / 2;
+  view.y = (minY + maxY) / 2;
+  view.scale = 0.9 * Math.min(width / (maxX - minX), height / (maxY - minY));
+  homeScale = view.scale;
+}
+
+const toScreen = (x, y) => [(x - view.x) * view.scale + width / 2, (y - view.y) * view.scale + height / 2];
+const toWorld = (sx, sy) => [(sx - width / 2) / view.scale + view.x, (sy - height / 2) / view.scale + view.y];
+const radius = p => p.r * Math.min(2.2, Math.max(0.7, Math.sqrt(view.scale / homeScale)));
+
+// ---------- drawing ----------
+
+let hovered = null;
+let selected = null;
+let drawQueued = false;
+
+function draw() {
+  if (drawQueued) return;
+  drawQueued = true;
+  requestAnimationFrame(() => { drawQueued = false; render(); });
+}
+
+function render() {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#0f1117";
+  ctx.fillRect(0, 0, width, height);
+
+  const neighbourSet = selected ? new Set(selected.nn.map(i => points[i])) : null;
+
+  // Lines from the selected show to its similar shows.
+  if (selected) {
+    const [sx, sy] = toScreen(selected.x, selected.y);
+    ctx.lineWidth = 1;
+    selected.nn.forEach((i, rank) => {
+      const q = points[i];
+      const [qx, qy] = toScreen(q.x, q.y);
+      ctx.strokeStyle = `rgba(255,180,84,${0.55 - rank * 0.02})`;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(qx, qy);
+      ctx.stroke();
+    });
+  }
+
+  for (const p of points) {
+    const [x, y] = toScreen(p.x, p.y);
+    const r = radius(p);
+    if (x < -r || y < -r || x > width + r || y > height + r) continue;
+    let alpha = p.faded ? 0.45 : 0.85;
+    if (selected && p !== selected && !neighbourSet.has(p)) alpha *= 0.25;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = p.colour;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  for (const p of [selected, hovered]) {
+    if (!p) continue;
+    const [x, y] = toScreen(p.x, p.y);
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, radius(p) + 3, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  drawLabels(neighbourSet);
+}
+
+// Titles for the biggest shows that fit on screen without overlapping, plus
+// cluster names when zoomed out. Boxes already drawn block later labels.
+function drawLabels(neighbourSet) {
+  const boxes = [];
+  const fits = (x, y, w, h) => {
+    for (const b of boxes) if (x < b[0] + b[2] && x + w > b[0] && y < b[1] + b[3] && y + h > b[1]) return false;
+    boxes.push([x, y, w, h]);
+    return true;
+  };
+  ctx.textBaseline = "middle";
+
+  const label = (p, bold) => {
+    const [x, y] = toScreen(p.x, p.y);
+    if (x < 0 || y < 0 || x > width || y > height) return;
+    ctx.font = `${bold ? 600 : 400} 12px system-ui, sans-serif`;
+    const text = p.title.length > 34 ? p.title.slice(0, 33) + "…" : p.title;
+    const w = ctx.measureText(text).width;
+    const lx = x + radius(p) + 4;
+    if (!fits(lx - 2, y - 8, w + 4, 16)) return;
+    ctx.fillStyle = "rgba(15,17,23,.75)";
+    ctx.fillRect(lx - 2, y - 8, w + 4, 16);
+    ctx.fillStyle = bold ? "#fff" : "#c9ccd6";
+    ctx.fillText(text, lx, y);
+  };
+
+  if (selected) {
+    label(selected, true);
+    for (const i of selected.nn) label(points[i], false);
+  }
+  if (hovered) label(hovered, true);
+
+  // Cluster names fade out as titles take over.
+  const clusterAlpha = Math.max(0, Math.min(1, 2.6 - view.scale / homeScale));
+  if (clusterAlpha > 0 && !selected) {
+    ctx.font = "600 13px system-ui, sans-serif";
+    ctx.globalAlpha = clusterAlpha;
+    for (const c of [...clusters].sort((a, b) => b.size - a.size)) {
+      const [x, y] = toScreen(c.x, c.y);
+      const w = ctx.measureText(c.label).width;
+      if (!fits(x - w / 2 - 6, y - 10, w + 12, 20)) continue;
+      ctx.fillStyle = "rgba(15,17,23,.7)";
+      ctx.fillRect(x - w / 2 - 6, y - 10, w + 12, 20);
+      ctx.fillStyle = clusterColour(c.id);
+      ctx.fillText(c.label, x - w / 2, y);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Zoomed out, only the best-known titles get labels; zoomed in, anything that
+  // fits. The overlap check does the thinning either way.
+  const zoom = view.scale / homeScale;
+  const limit = zoom < 1.8 ? 15 : zoom < 3.5 ? 60 : points.length;
+  for (const p of byPopularity.slice(0, limit)) {
+    if (selected && p !== selected && !neighbourSet.has(p)) continue;
+    label(p, false);
+  }
+}
+const byPopularity = points.slice().sort((a, b) => b.popularity - a.popularity);
+
+// ---------- hit testing ----------
+
+const cellSize = 20;
+const grid = new Map();
+for (const p of points) {
+  const key = Math.floor(p.x / cellSize) + "," + Math.floor(p.y / cellSize);
+  if (!grid.has(key)) grid.set(key, []);
+  grid.get(key).push(p);
+}
+
+function pointAt(sx, sy) {
+  const [wx, wy] = toWorld(sx, sy);
+  const reach = Math.max(1, Math.ceil(14 / view.scale / cellSize));
+  const cx = Math.floor(wx / cellSize), cy = Math.floor(wy / cellSize);
+  let best = null, bestD = Infinity;
+  for (let dx = -reach; dx <= reach; dx++) {
+    for (let dy = -reach; dy <= reach; dy++) {
+      for (const p of grid.get((cx + dx) + "," + (cy + dy)) || []) {
+        const [x, y] = toScreen(p.x, p.y);
+        const d = Math.hypot(x - sx, y - sy);
+        if (d < Math.max(radius(p) + 4, 8) && d < bestD) { best = p; bestD = d; }
+      }
+    }
+  }
+  return best;
+}
+
+// ---------- pan, zoom, pinch ----------
+
+const pointers = new Map();
+let dragMoved = false;
+let pinchStart = null;
+
+function zoomAt(sx, sy, factor) {
+  const [wx, wy] = toWorld(sx, sy);
+  view.scale = Math.min(40, Math.max(0.2, view.scale * factor));
+  view.x = wx - (sx - width / 2) / view.scale;
+  view.y = wy - (sy - height / 2) / view.scale;
+  draw();
+}
+
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  cancelFlight();
+  zoomAt(e.offsetX, e.offsetY, Math.exp(-e.deltaY * 0.0015));
+}, { passive: false });
+
+canvas.addEventListener("pointerdown", e => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
+  dragMoved = false;
+  cancelFlight();
+  if (pointers.size === 2) {
+    const [a, b] = [...pointers.values()];
+    pinchStart = { dist: Math.hypot(a.x - b.x, a.y - b.y), scale: view.scale };
+  }
+});
+
+canvas.addEventListener("pointermove", e => {
+  const prev = pointers.get(e.pointerId);
+  if (!prev) {
+    setHover(pointAt(e.offsetX, e.offsetY), e);
+    return;
+  }
+  const now = { x: e.offsetX, y: e.offsetY };
+  pointers.set(e.pointerId, now);
+  if (pointers.size === 2 && pinchStart) {
+    const [a, b] = [...pointers.values()];
+    const dist = Math.hypot(a.x - b.x, a.y - b.y);
+    const target = pinchStart.scale * dist / pinchStart.dist;
+    zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, target / view.scale);
+    dragMoved = true;
+    return;
+  }
+  const dx = now.x - prev.x, dy = now.y - prev.y;
+  if (Math.abs(dx) + Math.abs(dy) > 0) {
+    if (Math.hypot(dx, dy) > 2) dragMoved = true;
+    view.x -= dx / view.scale;
+    view.y -= dy / view.scale;
+    canvas.classList.add("dragging");
+    setHover(null);
+    draw();
+  }
+});
+
+function endPointer(e) {
+  if (!pointers.has(e.pointerId)) return;
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinchStart = null;
+  canvas.classList.remove("dragging");
+  if (!dragMoved && pointers.size === 0 && e.type === "pointerup") {
+    const p = pointAt(e.offsetX, e.offsetY);
+    if (p) select(p, false);
+    else if (selected) closePanel();
+  }
+}
+canvas.addEventListener("pointerup", endPointer);
+canvas.addEventListener("pointercancel", endPointer);
+canvas.addEventListener("pointerleave", () => setHover(null));
+
+// ---------- tooltip ----------
+
+const tooltip = document.getElementById("tooltip");
+
+function setHover(p, e) {
+  if (p !== hovered) {
+    hovered = p;
+    canvas.classList.toggle("pointing", !!p);
+    draw();
+  }
+  if (!p) { tooltip.style.display = "none"; return; }
+  tooltip.innerHTML = `<div class="name">${esc(p.title)}</div>
+    <div class="sub">${[p.year, fmt(p.format), p.score ? p.score + "%" : null].filter(Boolean).join(" · ")}</div>
+    <div class="sub">${esc(p.tags.slice(0, 4).join(", "))}</div>`;
+  tooltip.style.display = "block";
+  const tx = Math.min(e.clientX + 14, window.innerWidth - tooltip.offsetWidth - 8);
+  const ty = Math.min(e.clientY + 14, window.innerHeight - tooltip.offsetHeight - 8);
+  tooltip.style.left = tx + "px";
+  tooltip.style.top = ty + "px";
+}
+
+// ---------- camera flight ----------
+
+let flight = null;
+function cancelFlight() { if (flight) { cancelAnimationFrame(flight); flight = null; } }
+
+function flyTo(x, y, scale) {
+  cancelFlight();
+  const from = { ...view };
+  const start = performance.now();
+  const duration = 650;
+  const step = now => {
+    const t = Math.min(1, (now - start) / duration);
+    const k = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    view.x = from.x + (x - from.x) * k;
+    view.y = from.y + (y - from.y) * k;
+    view.scale = Math.exp(Math.log(from.scale) + (Math.log(scale) - Math.log(from.scale)) * k);
+    render();
+    flight = t < 1 ? requestAnimationFrame(step) : null;
+  };
+  flight = requestAnimationFrame(step);
+}
+
+// Frame the selected show together with its neighbours, leaving room for the panel.
+function frameSelection(p) {
+  const group = [p, ...p.nn.slice(0, 10).map(i => points[i])];
+  const xs = group.map(q => q.x), ys = group.map(q => q.y);
+  const panelWidth = width > 700 ? 380 : 0;
+  const usableW = width - panelWidth - 80;
+  const spanX = Math.max(40, Math.max(...xs) - Math.min(...xs));
+  const spanY = Math.max(40, Math.max(...ys) - Math.min(...ys));
+  const scale = Math.min(12, Math.max(view.scale * 0.6, Math.min(usableW / spanX, (height - 120) / spanY)));
+  const cx = (Math.max(...xs) + Math.min(...xs)) / 2 + panelWidth / 2 / scale;
+  const cy = (Math.max(...ys) + Math.min(...ys)) / 2;
+  flyTo(cx, cy, scale);
+}
+
+// ---------- side panel ----------
+
+const panel = document.getElementById("panel");
+
+function select(p, fly = true) {
+  selected = p;
+  input.value = p.title;
+  renderPanel(p);
+  if (fly) frameSelection(p);
+  else draw();
+}
+
+function closePanel() {
+  selected = null;
+  panel.classList.remove("open");
+  draw();
+}
+
+function renderPanel(p) {
+  const alt = p.romaji && p.romaji !== p.title ? `<div class="alt">${esc(p.romaji)}</div>` : "";
+  const parts = p.parts > 1 ? ` · ${p.parts} entries in franchise` : "";
+  const sims = p.nn.map((i, rank) => {
+    const q = points[i];
+    const pct = Math.round(Math.max(0, p.nnSim[rank]) * 100);
+    return `<div class="sim" data-i="${i}">
+      <img src="${q.cover || ""}" alt="" loading="lazy">
+      <div class="body">
+        <div class="name">${esc(q.title)}</div>
+        <div class="meta">${[q.year, fmt(q.format), q.score ? q.score + "%" : null].filter(Boolean).join(" · ")}</div>
+        <div class="bar"><span style="width:${pct}%"></span></div>
+      </div>
+    </div>`;
+  }).join("");
+
+  panel.innerHTML = `
+    <button class="close" aria-label="Close">×</button>
+    <div class="hero">
+      <img src="${p.cover || ""}" alt="">
+      <div>
+        <h2>${esc(p.title)}</h2>${alt}
+        <div class="meta">${[p.year, fmt(p.format), p.episodes ? p.episodes + " eps" : null, p.score ? p.score + "% score" : null].filter(Boolean).join(" · ")}${parts}</div>
+        <div class="meta">${esc(p.studios.join(", "))}</div>
+        <div class="meta" style="margin-top:6px"><a href="${p.url}" target="_blank" rel="noopener">View on AniList ↗</a></div>
+      </div>
+    </div>
+    <div class="chips">${p.genres.map(g => `<span class="chip">${esc(g)}</span>`).join("")}${p.tags.map(t => `<span class="chip" style="opacity:.7">${esc(t)}</span>`).join("")}</div>
+    <div class="section">Similar shows</div>
+    ${sims}`;
+  panel.classList.add("open");
+  panel.scrollTop = 0;
+  panel.querySelector(".close").onclick = closePanel;
+  panel.querySelectorAll(".sim").forEach(el => el.onclick = () => select(points[+el.dataset.i]));
+}
+
+// ---------- fuzzy search ----------
+
+// Normalise a title so romanisation and punctuation differences don't matter:
+// "Shōjo", "Shoujo" and "Shojo" all become "shojo".
+function norm(s) {
+  return s.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase()
+    .replace(/ou/g, "o").replace(/oo/g, "o").replace(/uu/g, "u").replace(/ii/g, "i")
+    .replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+function trigrams(s) {
+  const padded = `  ${s} `;
+  const set = new Set();
+  for (let i = 0; i < padded.length - 2; i++) set.add(padded.slice(i, i + 3));
+  return set;
+}
+
+const index = [];
+points.forEach((p, i) => {
+  const seen = new Set();
+  for (const t of [p.title, p.romaji, ...p.titles]) {
+    if (!t) continue;
+    const n = norm(t);
+    if (!n || seen.has(n)) continue;
+    seen.add(n);
+    const primary = t === p.title || t === p.romaji;
+    index.push({ i, raw: t, n, primary, compact: n.replace(/ /g, ""), words: n.split(" "), grams: trigrams(n) });
+  }
+});
+
+function matchScore(q, entry) {
+  if (entry.n === q.n) return 100;
+  if (entry.n.startsWith(q.n)) return 92 - Math.min(10, (entry.n.length - q.n.length) / 4);
+  if (entry.compact.includes(q.compact) && q.compact.length >= 2) return 80;
+  if (q.words.every(w => entry.words.some(ew => ew.startsWith(w)))) return 76;
+  if (q.n.length < 3) return 0;
+  let shared = 0;
+  for (const g of q.grams) if (entry.grams.has(g)) shared++;
+  const dice = 2 * shared / (q.grams.size + entry.grams.size);
+  // Typos: compare against the start of the title too, so a short query isn't
+  // punished for the rest of a long title.
+  const prefix = trigrams(entry.n.slice(0, q.n.length + 2));
+  let sharedPrefix = 0;
+  for (const g of q.grams) if (prefix.has(g)) sharedPrefix++;
+  const prefixDice = 2 * sharedPrefix / (q.grams.size + prefix.size);
+  const best = Math.max(dice, prefixDice);
+  return best > 0.35 ? 70 * best : 0;
+}
+
+function search(text) {
+  const n = norm(text);
+  if (!n) return [];
+  const q = { n, compact: n.replace(/ /g, ""), words: n.split(" "), grams: trigrams(n) };
+  const best = new Map();
+  for (const entry of index) {
+    let s = matchScore(q, entry);
+    if (s <= 0) continue;
+    // Prefer the main titles so results don't cite an obscure synonym.
+    if (entry.primary) s += 12;
+    const prev = best.get(entry.i);
+    if (!prev || s > prev.score) best.set(entry.i, { score: s, via: entry.raw });
+  }
+  return [...best.entries()]
+    .map(([i, m]) => ({ p: points[i], i, via: m.via, rank: m.score + 4 * Math.log10(points[i].popularity) }))
+    .sort((a, b) => b.rank - a.rank)
+    .slice(0, 8);
+}
+
+const input = document.getElementById("q");
+const results = document.getElementById("results");
+let current = [];
+let active = 0;
+
+function showResults() {
+  current = search(input.value);
+  active = 0;
+  if (!current.length) {
+    results.innerHTML = input.value.trim() ? `<div class="result"><span class="sub">No match. Try another title or spelling.</span></div>` : "";
+    results.classList.toggle("open", !!input.value.trim());
+    return;
+  }
+  results.innerHTML = current.map((r, k) => {
+    const via = norm(r.via) !== norm(r.p.title) && norm(r.via) !== norm(r.p.romaji) ? `matched “${esc(r.via)}”` : esc(r.p.romaji !== r.p.title ? r.p.romaji : "");
+    return `<div class="result${k === 0 ? " active" : ""}" data-k="${k}">
+      <img src="${r.p.cover || ""}" alt="" loading="lazy">
+      <div><div class="name">${esc(r.p.title)}</div>
+      <div class="sub">${[r.p.year, fmt(r.p.format)].filter(Boolean).join(" · ")}${via ? " · " + via : ""}</div></div>
+    </div>`;
+  }).join("");
+  results.classList.add("open");
+  results.querySelectorAll(".result").forEach(el => el.onclick = () => choose(+el.dataset.k));
+}
+
+function choose(k) {
+  const r = current[k];
+  if (!r) return;
+  input.value = r.p.title;
+  results.classList.remove("open");
+  input.blur();
+  select(r.p);
+}
+
+input.addEventListener("input", showResults);
+input.addEventListener("focus", () => { if (input.value.trim()) showResults(); });
+input.addEventListener("keydown", e => {
+  const items = results.querySelectorAll(".result[data-k]");
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    if (!items.length) return;
+    active = (active + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+    items.forEach((el, k) => el.classList.toggle("active", k === active));
+  } else if (e.key === "Enter") {
+    choose(active);
+  } else if (e.key === "Escape") {
+    results.classList.remove("open");
+    input.blur();
+  }
+});
+document.addEventListener("pointerdown", e => {
+  if (!document.getElementById("search").contains(e.target)) results.classList.remove("open");
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "/" && document.activeElement !== input) { e.preventDefault(); input.focus(); }
+  if (e.key === "Escape" && document.activeElement !== input && selected) closePanel();
+});
+
+// ---------- helpers ----------
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+function fmt(f) {
+  return { TV: "TV", TV_SHORT: "TV short", MOVIE: "Movie", OVA: "OVA", ONA: "ONA", SPECIAL: "Special", MUSIC: "Music" }[f] || f;
+}
+
+window.addEventListener("resize", resize);
+resize();
+fitAll();
+draw();
+</script>
+</body>
+</html>
