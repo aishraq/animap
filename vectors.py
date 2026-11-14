@@ -8,7 +8,8 @@ Writes data/vectors.npz (the matrix and feature names) and data/series.json
 (per-series metadata for search, tooltips and evaluation).
 
 Franchises are collapsed first: entries joined by sequel, prequel, side story
-and similar relations become one series. Each block of features is TF-IDF
+and similar relations become one series. The map then keeps the top
+TARGET_SERIES series by a blend of popularity, favourites and score. Each block of features is TF-IDF
 weighted, pooled across the series' entries by popularity, L2-normalised and
 then scaled by its block weight, so with cosine similarity a block contributes
 roughly in proportion to its weight squared.
@@ -24,6 +25,7 @@ from pathlib import Path
 import numpy as np
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
+from scipy.stats import rankdata
 
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -38,7 +40,17 @@ BLOCK_WEIGHTS = {
 
 # Relations that mean "same story, different instalment". CHARACTER, OTHER,
 # ADAPTATION and SOURCE are left out because they chain unrelated franchises.
-FRANCHISE_RELATIONS = {"SEQUEL", "PREQUEL", "SIDE_STORY", "PARENT", "SUMMARY", "COMPILATION", "ALTERNATIVE", "SPIN_OFF"}
+# SPIN_OFF and its reverse, PARENT, are left out too: AniList marks every
+# Gundam series as a spin-off of the 1979 original, which would merge Witch from
+# Mercury, Iron-Blooded Orphans, Wing and others into one point. Side stories
+# still join through SIDE_STORY, which the main entry lists.
+FRANCHISE_RELATIONS = {"SEQUEL", "PREQUEL", "SIDE_STORY", "SUMMARY", "COMPILATION", "ALTERNATIVE"}
+
+# Which series make the map: rank every series by a blend of percentile ranks
+# and keep the top TARGET_SERIES. Popularity keeps the shows people know;
+# favourites and score swap low-rated filler for acclaimed shows.
+TARGET_SERIES = 1000
+SELECTION_WEIGHTS = {"popularity": 0.6, "favourites": 0.2, "score": 0.2}
 
 DROP_FORMATS = {"MUSIC"}
 
@@ -58,21 +70,44 @@ def load_media(db_path):
 
 
 def group_franchises(media):
+    # Entries outside the fetched pool become extra graph nodes, so a franchise
+    # still joins up when the link between two seasons runs through an OVA or
+    # special we didn't fetch. Those nodes are dropped again after grouping.
     index = {m["id"]: i for i, m in enumerate(media)}
     rows, cols = [], []
     for m in media:
         for edge in m["relations"]["edges"]:
             target = edge["node"]["id"]
-            if edge["relationType"] in FRANCHISE_RELATIONS and target in index:
+            if edge["relationType"] in FRANCHISE_RELATIONS and edge["node"]["type"] == "ANIME":
+                if target not in index:
+                    index[target] = len(index)
                 rows.append(index[m["id"]])
                 cols.append(index[target])
-    graph = coo_matrix((np.ones(len(rows)), (rows, cols)), shape=(len(media), len(media)))
+    graph = coo_matrix((np.ones(len(rows)), (rows, cols)), shape=(len(index), len(index)))
     _, labels = connected_components(graph, directed=False)
 
     groups = defaultdict(list)
-    for m, label in zip(media, labels):
+    for m, label in zip(media, labels[:len(media)]):
         groups[label].append(m)
     return [sorted(members, key=lambda m: -m["popularity"]) for members in groups.values()]
+
+
+def select_series(series, target):
+    """Keep the top series by the blend in SELECTION_WEIGHTS."""
+    popularity = np.array([members[0]["popularity"] for members in series], dtype=float)
+    favourites = np.array([max(m["favourites"] for m in members) for members in series], dtype=float)
+    score = np.array([series_score(members) or 0 for members in series], dtype=float)
+    blend = sum(SELECTION_WEIGHTS[name] * rankdata(values) / len(values) for name, values in [("popularity", popularity), ("favourites", favourites), ("score", score)])
+    keep = np.argsort(-blend)[:target]
+    return [series[i] for i in sorted(keep, key=lambda i: -popularity[i])]
+
+
+def series_score(members):
+    """Popularity-weighted average score, or None if no entry has one."""
+    scored = [(m["averageScore"], m["popularity"]) for m in members if m["averageScore"]]
+    if not scored:
+        return None
+    return sum(s * p for s, p in scored) / sum(p for _, p in scored)
 
 
 def entry_features(m):
@@ -136,8 +171,8 @@ def numeric_block(series):
         years = [m["seasonYear"] or m["startDate"]["year"] for m in members]
         years = [y for y in years if y]
         episodes = sum(m["episodes"] or 0 for m in members)
-        scores = [(m["averageScore"], m["popularity"]) for m in members if m["averageScore"]]
-        score = sum(s * p for s, p in scores) / sum(p for _, p in scores) if scores else np.nan
+        score = series_score(members)
+        score = np.nan if score is None else score
         rows.append([min(years) if years else np.nan, np.log1p(episodes), np.log1p(members[0]["popularity"]), score])
 
     matrix = np.array(rows, dtype=np.float64)
@@ -173,7 +208,7 @@ def series_metadata(members, top_tags):
         "year": min(years) if years else None,
         "format": main["format"],
         "episodes": sum(m["episodes"] or 0 for m in members),
-        "score": main["averageScore"],
+        "score": round(series_score(members)) if series_score(members) else None,
         "popularity": main["popularity"],
         "genres": main["genres"],
         "top_tags": top_tags,
@@ -198,6 +233,8 @@ def main():
 
     series = group_franchises(media)
     print(f"{len(media)} entries collapsed into {len(series)} series")
+    series = select_series(series, TARGET_SERIES)
+    print(f"kept the top {len(series)} by {SELECTION_WEIGHTS}")
     for members in sorted(series, key=len, reverse=True)[:8]:
         print(f"  {len(members):>3}  {members[0]['title']['romaji']}")
 

@@ -2,7 +2,7 @@
 
 ## Current status and next step
 
-Stage 1 (fetch) is written. At the user's request we are working with the 1,000 most popular anime (data/sample.db, fetched 14 Nov 2026) rather than the full catalogue for now. All four stages now work end to end on that set. Stage 2 turns the 1,000 entries into 682 series with 876 features. Stage 3 produces 31 clusters, with 15 per cent of series unclustered. Opening index.html gives a working map with fuzzy search, a similar-shows panel, hover tooltips, pan and zoom. It was checked in Chrome on 14 Nov 2026 with no console errors. The next step is user feedback on the map, then the studio weight decision, then the full fetch.
+Stage 1 (fetch) is written. At the user's request we are working with the 1,000 most popular anime (data/sample.db, fetched 14 Nov 2026) rather than the full catalogue for now. All four stages now work end to end on that set. Stage 2 turns the 1,000 entries into 682 series with 876 features. Stage 3 produces 31 clusters, with 15 per cent of series unclustered. Opening index.html gives a working map with fuzzy search, a similar-shows panel, hover tooltips, pan and zoom. It was checked in Chrome on 14 Nov 2026 with no console errors. The user decided on 14 Nov 2026 that a set of about 1,000 is enough and that no full catalogue fetch is needed. The set is now chosen as 1,000 series rather than 1,000 entries. They come from a pool of the top 3,000 entries by popularity (data/sample.db, fetched 14 Nov 2026), ranked by a blend of popularity, favourites and score. The map has 1,000 points and 35 clusters.
 
 ## Design decisions
 
@@ -44,9 +44,17 @@ Fuzzy search runs in the page with no library. It normalises titles (accents, ca
 
 The page loads animap.js through a script tag rather than fetching JSON, so it works from file:// with no server.
 
+## Selection log (14 Nov 2026)
+
+The pool is the top 3,000 entries by AniList popularity, which is 60 requests and about two minutes. Selection happens locally, so the rule can change without a refetch. Series are ranked by percentile on popularity (weight 0.6), favourites (0.2) and score (0.2), and the top 1,000 are kept. Compared with popularity alone, this swaps in about 70 series. It drops low-rated fanservice titles such as OniAi and Maken-Ki and adds acclaimed ones such as Princess Tutu, Space Brothers, Gunbuster, Tomorrow's Joe and Tiger & Bunny. Ranking popularity within decades was tried and left out. The pool only holds about 75 pre-2000 series, so it barely changed anything, and fixing the era bias would need a separate fetch sorted by score or favourites.
+
+The franchise relations changed. In the bigger pool, SPIN_OFF and PARENT chained every Gundam series into one point, because AniList marks each one as a spin-off of the 1979 original. Both are now excluded, and side stories still join through SIDE_STORY. ALTERNATIVE stays, so remakes like Fullmetal Alchemist and Brotherhood, or Hunter x Hunter 1999 and 2011, remain one point rather than wasting each other's top slot. Fate stays one point of 20 entries. Grouping now also passes through related entries outside the pool, using the IDs listed in the relations. This rejoins franchises whose seasons link through an unfetched OVA (ARIA was split three ways) and merged 22 groups with no new oversized chains.
+
+The recommendation score is now 39.6 per cent, against 45.5 per cent before. The two numbers aren't comparable: there are 1,000 candidates instead of 682 (random falls from 2.9 to 2.0 per cent), and more of each show's recommendations are now inside the set. Known weak spot: Space Brothers matches workplace comedies (Servant x Service, Blend-S) through the shared Work tag, ahead of Planetes.
+
 ## Open items
 
-1. Run the full fetch and profile it, especially null rates for score, year and episodes in obscure entries.
+1. Era bias: only about 46 of the 1,000 series are from before 2000. If that matters, fetch a few hundred top entries by SCORE_DESC or FAVOURITES_DESC above a popularity floor and add them to the pool.
 2. Decide on a popularity floor and which formats to drop (MUSIC, possibly very short specials) before vectorising.
 3. Decide whether SPIN_OFF and ALTERNATIVE should join franchises; check the largest connected components.
 4. Choose per-category tag weights.

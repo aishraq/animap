@@ -9,7 +9,7 @@ The pipeline is three Python scripts and one HTML page. Dependencies are managed
 `fetch.py` pulls anime metadata from the AniList GraphQL API and caches the raw JSON for each entry in SQLite. Adult titles are excluded at query time; everything else is kept, and filtering happens later.
 
 ```
-uv run fetch.py --sample 200   # popular-first sample into data/sample.db
+uv run fetch.py --sample 3000  # the top 3,000 by popularity into data/sample.db (what the map uses)
 uv run fetch.py                # full catalogue into data/animap.db
 uv run inspect_db.py data/animap.db
 ```
@@ -18,7 +18,7 @@ AniList currently limits clients to 30 requests a minute (normally 90), so the s
 
 ## Stage 2: vectors
 
-`vectors.py` collapses franchises into single series, using sequel, prequel, side story, summary, alternative, spin-off and parent relations. It then builds one weighted vector per series and writes `data/vectors.npz` plus `data/series.json`, which holds titles, synonyms, cover, tags and AniList recommendations for each series. Each feature block (tags, genres, studios, key staff, format and numeric fields) is TF-IDF weighted and pooled across the series' entries by popularity. The block is then L2-normalised and scaled by its weight, which is set at the top of the script.
+`vectors.py` collapses franchises into single series, using sequel, prequel, side story, summary, compilation and alternative-version relations. It then keeps the top 1,000 series, ranked by a blend of popularity, favourites and score. It then builds one weighted vector per series and writes `data/vectors.npz` plus `data/series.json`, which holds titles, synonyms, cover, tags and AniList recommendations for each series. Each feature block (tags, genres, studios, key staff, format and numeric fields) is TF-IDF weighted and pooled across the series' entries by popularity. The block is then L2-normalised and scaled by its weight, which is set at the top of the script.
 
 ```
 uv run vectors.py                 # data/sample.db by default
