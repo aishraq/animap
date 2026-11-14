@@ -88,7 +88,20 @@ Match percentages used to be raw cosine similarity, so a typical best match read
 
 The panel now shows each series' cleaned synopsis, the same text used for the embedding. It is cut to five lines, with a "Read more" button that appears only when the text is truncated. The data file grew from 1.1 to 1.6 MB.
 
+## Recommendations in the vectors (15 Nov 2026)
+
+AniList user recommendations are now an ingredient of similarity, not just the benchmark. recommendation_edges collects undirected series pairs, weighted by log(1 + votes) summed over both directions and all franchise entries: 6,430 pairs, a median of 10 per series. recommendation_block gives each series a row of its recommended shows plus itself on the diagonal (set to the row maximum). That way a direct recommendation raises the pair's cosine, and shared recommendations pull shows together too.
+
+To keep the benchmark honest, a fixed fifth of pairs, chosen by CRC32 of the two AniList ids, is held out. evaluate.py now always rebuilds without those pairs and scores only on them. The production build uses all pairs. Held-out score by weight: 0 gave 38.9%, 0.5 gave 41.0%, 1.0 gave 45.7%, 1.5 gave 47.7% (chosen), 2.0 gave 46.0%, 3.0 gave 42.8% and 5.0 gave 40.1%. The block costs 8.8 points when removed, making it the most valuable after tags (6.8). Genres now add nothing measurable (+0.2 without them). Popularity bias barely moved: the top 100 shows fill 15% of neighbour slots, against 13% before.
+
+Spot checks that never worked now do. Bebop finds Samurai Champloo, Michiko & Hatchin and Space Dandy. Death Note finds Code Geass, Moriarty and Psycho-Pass. Frieren gains Kino's Journey, To Your Eternity and Delicious in Dungeon. Escaflowne gains The Twelve Kingdoms and Moribito. Space Brothers gains Silver Spoon, Bakuman and Shirobako. Clusters went from 35 to 46.
+
+## Mood search (15 Nov 2026)
+
+The page has a "By title / By mood" switch. Mood search embeds the typed description in the browser with transformers.js 3.8.1 (from jsDelivr) running Xenova/bge-small-en-v1.5 in its q8 form (about 34 MB, downloaded on first use and cached by the browser). It uses CLS pooling with normalisation and the BGE query prefix. The query is matched by dot product against mood.js: one int8-quantised, base64 embedding per series (0.5 MB, loaded on first use) of the text "title. synopsis Genres: ... Themes: top tags". Adding genres and tags to the synopsis fixed vibe queries: "cozy cooking in a fantasy world" went from Mashle first to Campfire Cooking, Delicious in Dungeon and Restaurant to Another World. Browser results were checked against Python on four queries: the top three are identical, with one or two swaps lower down from quantisation. The top 20 are ringed in ice blue on the map with everything else dimmed, and the view flies to frame the top 12. Weak spot: pure emotion queries ("something sad that will make me cry") are hit and miss, because synopses describe plots, not feelings.
+
 ## Open items
 
 1. Studio weight: kept open at the user's request. The plan is to compare two maps (light and heavy studio weight) by eye on shows the user knows, rather than tuning to the benchmark, which undervalues "same studio, same feel".
-2. Neighbour misses that neither metadata nor synopses capture (Bebop and Samurai Champloo, Death Note and Code Geass). The remaining lever is blending AniList user recommendations into the similarity directly. That would make the benchmark circular, so it would need a held-out split to evaluate.
+2. Genres now add nothing measurable on top of tags and recommendations; consider lowering their weight. Mood search is weak on pure emotion queries.
+3. Shareable links (address changes when a show is selected), and a scheduled monthly refresh, both suggested and not yet started.

@@ -4,10 +4,16 @@ Usage:
     uv run evaluate.py
     uv run evaluate.py "Frieren" "Cowboy Bebop"
 
-Prints the nearest neighbours for a few known shows, then scores the vectors
-against AniList's user recommendations: for each series, what share of the
-shows users recommend for it appear in our 20 nearest neighbours. The same
-score is repeated with each feature block removed, to show what each one adds.
+Prints the nearest neighbours for a few known shows (from data/vectors.npz),
+then scores the vectors against AniList's user recommendations: for each
+series, what share of the shows users recommend for it appear in our 20
+nearest neighbours. The same score is repeated with each feature block
+removed, to show what each one adds.
+
+Recommendations are also an ingredient of the vectors, so the score uses only
+a fixed held-out fifth of recommendation pairs, and rebuilds the vectors with
+those pairs removed. That keeps the benchmark honest at any recommendation
+weight.
 """
 
 import json
@@ -15,6 +21,8 @@ import sys
 from pathlib import Path
 
 import numpy as np
+
+import vectors
 
 DATA_DIR = Path(__file__).parent / "data"
 K = 20
@@ -29,14 +37,13 @@ def neighbours(X, k=K):
     return order, np.take_along_axis(sims, order, axis=1)
 
 
-def recommendation_targets(series):
-    """Map each series to the set of other series its users recommend."""
-    entry_to_series = {entry: i for i, s in enumerate(series) for entry in s["members"]}
-    targets = []
-    for i, s in enumerate(series):
-        recs = {entry_to_series[r["id"]] for r in s["recommendations"] if r["id"] in entry_to_series and r["rating"] > 0}
-        recs.discard(i)
-        targets.append(recs)
+def held_out_targets(series):
+    """For each series, the held-out shows users recommend alongside it."""
+    targets = [set() for _ in series]
+    for a, b in vectors.recommendation_edges(series):
+        if vectors.is_held_out(series, (a, b)):
+            targets[a].add(b)
+            targets[b].add(a)
     return targets
 
 
@@ -70,16 +77,23 @@ def main():
         for j, sim in zip(order[i][:10], sims[i][:10]):
             print(f"  {sim:.2f}  {series[j]['title']}")
 
-    targets = recommendation_targets(series)
-    score, n = recall(order, targets)
-    print(f"\nShare of user recommendations found in our top {K}: {score:.1%} (over {n} series; random would be about {K / len(series):.1%})")
+    score_held_out(verbose=True)
 
-    blocks = sorted({name.split(":")[0] for name in names})
-    for block in blocks:
-        mask = np.array([not name.startswith(block + ":") for name in names])
-        ablated, _ = neighbours(X[:, mask])
-        without, _ = recall(ablated, targets)
-        print(f"  without {block:<8} {without:.1%}  ({without - score:+.1%})")
+
+def score_held_out(verbose=False):
+    """Rebuild without the held-out pairs and score on them."""
+    X, names, series, _ = vectors.build(vectors.DATA_DIR / "sample.db", verbose=False, holdout=True)
+    targets = held_out_targets(series)
+    order, _ = neighbours(X)
+    score, n = recall(order, targets)
+    if verbose:
+        print(f"\nShare of held-out user recommendations found in our top {K}: {score:.1%} (over {n} series; random would be about {K / len(series):.1%})")
+        for block in sorted({name.split(":")[0] for name in names}):
+            mask = np.array([not name.startswith(block + ":") for name in names])
+            ablated, _ = neighbours(X[:, mask])
+            without, _ = recall(ablated, targets)
+            print(f"  without {block:<8} {without:.1%}  ({without - score:+.1%})")
+    return score
 
 
 if __name__ == "__main__":

@@ -12,6 +12,10 @@ from pathlib import Path
 import numpy as np
 
 MODEL_NAME = "BAAI/bge-small-en-v1.5"
+# The same model in ONNX form, run in the browser by transformers.js for mood search.
+BROWSER_MODEL = "Xenova/bge-small-en-v1.5"
+# BGE models expect this instruction in front of short search queries.
+QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 CACHE_PATH = Path(__file__).parent / "data" / "synopsis_cache.npz"
 MIN_LENGTH = 80
 
@@ -75,3 +79,15 @@ def embed(texts, verbose=True):
 
     dim = len(next(iter(cache.values())))
     return np.stack([cache[k] if t else np.zeros(dim, dtype=np.float32) for k, t in zip(keys, texts)])
+
+
+def search_document(series):
+    """The text a mood search is matched against for one series.
+
+    The synopsis alone misses vibe words that synopses rarely state ("cozy",
+    "cooking"), so the genres and top tags go in too.
+    """
+    return (
+        f"{series['title']}. {series['synopsis']} "
+        f"Genres: {', '.join(series['genres'])}. Themes: {', '.join(series['top_tags'])}."
+    )

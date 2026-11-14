@@ -17,6 +17,7 @@ roughly in proportion to its weight squared.
 
 import json
 import re
+import zlib
 import sqlite3
 import sys
 from collections import Counter, defaultdict
@@ -43,6 +44,12 @@ BLOCK_WEIGHTS = {
     # and synopsis alone scored 16%, because plot summaries match on premise
     # (Death Note's nearest synopsis is a romcom parody of it), not feel.
     "synopsis": 0.7,
+    # What AniList users recommend alongside each show (see recommendation_block).
+    # Tested 14 Nov 2026 on a held-out fifth of recommendation pairs: 0 gave
+    # 38.9%, 1.0 gave 45.7%, 1.5 gave 47.7% (peak), 2.0 gave 46.0% and 5.0 gave 40.1%.
+    # It connects pairs the metadata can't (Bebop and Samurai Champloo, Death
+    # Note and Code Geass) with little popularity bias.
+    "recs": 1.5,
 }
 
 # Relations that mean "same story, different instalment". CHARACTER, OTHER,
@@ -252,6 +259,52 @@ def synopsis_block(texts, verbose=True):
     return l2_rows(vectors)
 
 
+def recommendation_edges(series):
+    """Undirected series pairs that AniList users recommend together.
+
+    Each pair's weight is log(1 + votes), summed over both directions and over
+    every entry in each franchise, so a few viral recommendations don't swamp
+    the rest.
+    """
+    entry_to_series = {m["id"]: i for i, members in enumerate(series) for m in members}
+    edges = Counter()
+    for i, members in enumerate(series):
+        for m in members:
+            for rec in (m.get("recommendations") or {}).get("nodes", []):
+                target = rec["mediaRecommendation"]
+                if not target or rec["rating"] <= 0 or target["id"] not in entry_to_series:
+                    continue
+                j = entry_to_series[target["id"]]
+                if j != i:
+                    edges[tuple(sorted((i, j)))] += np.log1p(rec["rating"])
+    return edges
+
+
+def is_held_out(series, pair):
+    """A fixed fifth of recommendation pairs, kept out of the vectors for testing.
+
+    Keyed on AniList ids so the split stays the same across rebuilds.
+    """
+    a, b = sorted(series[i][0]["id"] for i in pair)
+    return zlib.crc32(f"{a}-{b}".encode()) % 5 == 0
+
+
+def recommendation_block(series, edges):
+    """Each series' row is the shows users recommend alongside it, plus itself.
+
+    Including the series itself means that when users recommend B for A, A's and
+    B's rows share B (and A), so the pair's cosine similarity rises directly.
+    Shows that are recommended alongside the same third shows also move closer.
+    """
+    n = len(series)
+    matrix = np.zeros((n, n), dtype=np.float32)
+    for (a, b), weight in edges.items():
+        matrix[a, b] = matrix[b, a] = weight
+    row_max = matrix.max(axis=1)
+    matrix[np.arange(n), np.arange(n)] = row_max
+    return l2_rows(matrix)
+
+
 def l2_rows(matrix):
     norms = np.linalg.norm(matrix, axis=1, keepdims=True)
     return matrix / np.where(norms > 0, norms, 1)
@@ -296,8 +349,13 @@ def series_metadata(members, top_tags):
     }
 
 
-def build(db_path, verbose=True):
-    """Return the weighted matrix, its feature names and the selected series."""
+def build(db_path, verbose=True, holdout=False):
+    """Return the weighted matrix, its feature names and the selected series.
+
+    With holdout=True, the held-out fifth of recommendation pairs is left out
+    of the recommendation block, so evaluate.py can test on pairs the vectors
+    never saw.
+    """
     say = print if verbose else (lambda *a, **k: None)
     media = load_media(db_path)
     for m in media:
@@ -326,6 +384,14 @@ def build(db_path, verbose=True):
         blocks.append(matrix * BLOCK_WEIGHTS["synopsis"])
         names += [f"synopsis:{j}" for j in range(matrix.shape[1])]
         say(f"synopsis {matrix.shape[1]:>5} dims, {sum(1 for t in texts if not t)} series without one")
+
+    if BLOCK_WEIGHTS["recs"] > 0:
+        edges = recommendation_edges(series)
+        if holdout:
+            edges = Counter({pair: w for pair, w in edges.items() if not is_held_out(series, pair)})
+        blocks.append(recommendation_block(series, edges) * BLOCK_WEIGHTS["recs"])
+        names += [f"recs:{j}" for j in range(len(series))]
+        say(f"recs     {len(edges):>5} recommended pairs{' (held-out fifth removed)' if holdout else ''}")
 
     X = np.hstack(blocks)
     say(f"vector matrix {X.shape}")

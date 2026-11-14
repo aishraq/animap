@@ -14,6 +14,7 @@ dimensions the points are too evenly spread for density clustering, and it
 either merges almost everything or leaves half the shows unclustered.
 """
 
+import base64
 import json
 import os
 import warnings
@@ -23,6 +24,8 @@ import numpy as np
 import umap
 from sklearn.cluster import HDBSCAN
 from sklearn.decomposition import PCA
+
+from synopsis import BROWSER_MODEL, QUERY_PREFIX, embed, search_document
 
 ROOT = Path(__file__).parent
 DATA_DIR = ROOT / "data"
@@ -80,6 +83,26 @@ def match_scores(sims, neighbour_sims):
     high = np.percentile(neighbour_sims[:, 0], 95)
     scaled = np.clip((neighbour_sims - low) / (high - low), 0, 1)
     return np.round(100 * np.sqrt(scaled)).astype(int)
+
+
+def export_mood_vectors(series):
+    """Write mood.js: one embedding per series for the page's mood search.
+
+    Vectors are unit length, so they are stored as int8 (value * 127) and
+    base64-encoded, about 0.5 MB for 1,000 series. The page loads this file only
+    when someone runs a mood search.
+    """
+    vectors = embed([search_document(s) for s in series], verbose=False)
+    quantised = np.clip(np.round(vectors * 127), -127, 127).astype(np.int8)
+    payload = {
+        "model": BROWSER_MODEL,
+        "prefix": QUERY_PREFIX,
+        "dims": int(vectors.shape[1]),
+        "vectors": base64.b64encode(quantised.tobytes()).decode(),
+    }
+    text = json.dumps(payload, separators=(",", ":"))
+    (ROOT / "mood.js").write_text(f"window.ANIMAP_MOOD = {text};\n")
+    print(f"wrote mood.js ({len(text) / 1e6:.1f} MB)")
 
 
 def main():
@@ -165,6 +188,7 @@ def main():
     (ROOT / "animap.json").write_text(payload)
     (ROOT / "animap.js").write_text(f"window.ANIMAP = {payload};\n")
     print(f"wrote animap.json and animap.js ({len(payload) / 1e6:.1f} MB, {len(points)} points)")
+    export_mood_vectors(series)
     for c in cluster_info:
         print(f"  {c['size']:>3}  {c['label']}")
 

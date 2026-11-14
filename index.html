@@ -50,6 +50,17 @@
   .result .name { font-weight: 700; line-height: 1.3; }
   .result .sub { color: var(--lilac); font-size: 12px; }
   .empty { padding: 12px 16px; color: var(--lilac); font-size: 13px; }
+  .modes { display: inline-flex; gap: 4px; margin-top: 8px; padding: 3px; border-radius: 999px; background: var(--surface); border: 1.5px solid var(--edge); }
+  .modes button { border: 0; border-radius: 999px; padding: 4px 12px; background: none; color: var(--lilac); font-size: 12px; font-weight: 700; cursor: pointer; }
+  .modes button[aria-pressed="true"] { background: var(--ice); color: var(--night-deep); }
+  .examples { padding: 12px 14px 14px; }
+  .examples p { margin: 0 0 8px; color: var(--lilac); font-size: 12px; }
+  .examples button { margin: 0 6px 6px 0; padding: 4px 11px; border-radius: 999px; border: 1.5px solid var(--edge); background: none; color: var(--moon); font-size: 12px; cursor: pointer; }
+  .examples button:hover { border-color: var(--ice); color: var(--ice); }
+  .status { padding: 12px 16px; color: var(--lilac); font-size: 13px; }
+  .status .bar { height: 4px; margin-top: 8px; border-radius: 2px; background: var(--raised); overflow: hidden; }
+  .status .bar span { display: block; height: 100%; background: var(--ice); transition: width .2s; }
+  .rank { width: 22px; flex: none; text-align: right; color: var(--ice); font-weight: 800; font-size: 12px; }
 
   /* Bottom left: star size switch and credit */
   #bottom { position: fixed; left: 16px; bottom: 14px; z-index: 2; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
@@ -122,6 +133,10 @@
   <div class="searchbox">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
     <input id="q" type="search" placeholder="Find an anime you love" autocomplete="off" spellcheck="false" aria-label="Search anime by any title">
+  </div>
+  <div class="modes" role="group" aria-label="Search by">
+    <button type="button" data-mode="title" aria-pressed="true">By title</button>
+    <button type="button" data-mode="mood" aria-pressed="false">By mood</button>
   </div>
   <div id="results" role="listbox"></div>
 </div>
@@ -255,6 +270,7 @@ function fitAll() {
 
 let hovered = null;
 let selected = null;
+let moodHits = null;
 let reveal = 1;
 let drawQueued = false;
 
@@ -278,7 +294,8 @@ function render() {
   }
   ctx.globalAlpha = 1;
 
-  const near = selected ? new Set(selected.nn.map(i => points[i])) : null;
+  const near = selected ? new Set(selected.nn.map(i => points[i])) : moodHits ? new Set(moodHits) : null;
+  const focus = selected || moodHits;
 
   // The selected show's constellation: lines out to its similar shows, drawn
   // in when it's picked.
@@ -307,7 +324,7 @@ function render() {
     const r = radius(p);
     if (x < -4 * r || y < -4 * r || x > width + 4 * r || y > height + 4 * r) continue;
     let alpha = p.loose ? 0.55 : 0.95;
-    if (selected && p !== selected && !near.has(p)) alpha = 0.16;
+    if (focus && p !== selected && !near.has(p)) alpha = 0.16;
     ctx.globalAlpha = alpha;
     if (sizeMode === "score" && !p.score) {
       ctx.strokeStyle = p.colour;
@@ -321,6 +338,17 @@ function render() {
     }
   }
   ctx.globalAlpha = 1;
+
+  if (moodHits && !selected) {
+    ctx.strokeStyle = "#72e6ff";
+    ctx.lineWidth = 1.5;
+    for (const p of moodHits) {
+      const [x, y] = toScreen(p.x, p.y);
+      ctx.beginPath();
+      ctx.arc(x, y, radius(p) + 4, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
 
   for (const [p, colour] of [[selected, "#ff7eb6"], [hovered, "#ecebff"]]) {
     if (!p) continue;
@@ -365,12 +393,14 @@ function drawLabels(near) {
   if (selected) {
     label(selected, true);
     for (const i of selected.nn) label(points[i], false);
+  } else if (moodHits) {
+    for (const p of moodHits) label(p, false);
   }
   if (hovered && hovered !== selected) label(hovered, false);
 
   const zoom = view.scale / homeScale;
   const clusterAlpha = Math.max(0, Math.min(1, 2.6 - zoom));
-  if (clusterAlpha > 0 && !selected) {
+  if (clusterAlpha > 0 && !selected && !moodHits) {
     ctx.font = `700 12px ${LABEL_FONT}`;
     ctx.globalAlpha = clusterAlpha;
     for (const c of [...clusters].sort((a, b) => b.size - a.size)) {
@@ -392,7 +422,7 @@ function drawLabels(near) {
   // Zoomed out, only the best-known titles; zoomed in, anything that fits.
   const limit = zoom < 1.8 ? 15 : zoom < 3.5 ? 60 : points.length;
   for (const p of byPopularity.slice(0, limit)) {
-    if (selected && p !== selected && !near.has(p)) continue;
+    if (focus && p !== selected && !near.has(p)) continue;
     label(p, false);
   }
 }
@@ -573,7 +603,8 @@ const panel = document.getElementById("panel");
 
 function select(p, fly = true) {
   selected = p;
-  input.value = p.title;
+  moodHits = null;
+  if (mode === "title") input.value = p.title;
   renderPanel(p);
   if (fly) {
     frameSelection(p);
@@ -740,8 +771,129 @@ function choose(k) {
   select(r.p);
 }
 
-input.addEventListener("input", showResults);
-input.addEventListener("focus", () => { if (input.value.trim() && !selected) showResults(); });
+// ---------- mood search ----------
+
+// Matches a description against each show's synopsis, genres and themes using
+// the same sentence model the Python pipeline used (BGE-small), run in the
+// browser by transformers.js. Nothing loads until the first mood search.
+let mode = "title";
+let mood = null;
+let lastMood = "";
+const MOOD_EXAMPLES = ["cozy cooking in a fantasy world", "a slow, melancholy journey with a found family", "a time loop to save friends from dying", "high school girls start a band", "a detective in a cyberpunk city", "an underdog sports team"];
+
+function setMode(next) {
+  mode = next;
+  document.querySelectorAll(".modes button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
+  input.placeholder = mode === "mood" ? "Describe what you're in the mood for" : "Find an anime you love";
+  input.value = "";
+  lastMood = "";
+  moodHits = null;
+  draw();
+  if (mode === "mood") showExamples();
+  else results.classList.remove("open");
+  input.focus();
+}
+document.querySelectorAll(".modes button").forEach(b => b.addEventListener("click", () => setMode(b.dataset.mode)));
+
+function showExamples() {
+  results.innerHTML = `<div class="examples"><p>Describe a story, a feeling or a setting, then press Enter. Or try one of these:</p>
+    ${MOOD_EXAMPLES.map(t => `<button type="button">${esc(t)}</button>`).join("")}</div>`;
+  results.classList.add("open");
+  results.querySelectorAll(".examples button").forEach(b => b.onclick = () => { input.value = b.textContent; runMood(b.textContent); });
+}
+
+function showStatus(text, progress) {
+  results.innerHTML = `<div class="status">${esc(text)}${progress == null ? "" : `<div class="bar"><span style="width:${progress}%"></span></div>`}</div>`;
+  results.classList.add("open");
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const tag = document.createElement("script");
+    tag.src = src;
+    tag.onload = resolve;
+    tag.onerror = () => reject(new Error(`could not load ${src}`));
+    document.head.appendChild(tag);
+  });
+}
+
+async function loadMood() {
+  if (mood) return mood;
+  showStatus("Loading the language model (about 34 MB, only the first time)…", 0);
+  if (!window.ANIMAP_MOOD) await loadScript("mood.js");
+  const meta = window.ANIMAP_MOOD;
+  const { pipeline } = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1");
+  const files = {};
+  const extractor = await pipeline("feature-extraction", meta.model, {
+    dtype: "q8",
+    progress_callback: e => {
+      if (e.status !== "progress" || !e.total) return;
+      files[e.file] = [e.loaded, e.total];
+      const loaded = Object.values(files).reduce((a, f) => a + f[0], 0);
+      const total = Object.values(files).reduce((a, f) => a + f[1], 0);
+      showStatus("Loading the language model (about 34 MB, only the first time)…", Math.round(100 * loaded / total));
+    },
+  });
+  const bytes = Uint8Array.from(atob(meta.vectors), c => c.charCodeAt(0));
+  mood = { extractor, prefix: meta.prefix, dims: meta.dims, vectors: new Int8Array(bytes.buffer) };
+  return mood;
+}
+
+async function runMood(text) {
+  text = text.trim();
+  if (!text) return;
+  lastMood = text;
+  try {
+    const m = await loadMood();
+    showStatus("Searching…");
+    const output = await m.extractor(m.prefix + text, { pooling: "cls", normalize: true });
+    const q = output.data;
+    const scores = points.map((p, i) => {
+      let dot = 0;
+      const offset = i * m.dims;
+      for (let d = 0; d < m.dims; d++) dot += q[d] * m.vectors[offset + d];
+      return [dot / 127, i];
+    }).sort((a, b) => b[0] - a[0]).slice(0, 20);
+    showMoodResults(scores.map(([, i]) => points[i]));
+  } catch (err) {
+    console.error(err);
+    showStatus("The language model couldn't load. Check your connection and try again.");
+  }
+}
+
+function showMoodResults(hits) {
+  if (selected) closePanel();
+  moodHits = hits;
+  current = hits.map((p, k) => ({ p, i: points.indexOf(p), via: p.title }));
+  active = 0;
+  results.innerHTML = hits.slice(0, 8).map((p, k) => `<div class="result${k === 0 ? " active" : ""}" data-k="${k}" role="option">
+      <span class="rank">${k + 1}</span>
+      <img src="${esc(p.cover || "")}" alt="" loading="lazy">
+      <div><div class="name">${esc(p.title)}</div>
+      <div class="sub">${esc(yearFormat(p))}${p.tags.length ? `, ${esc(p.tags.slice(0, 2).join(", "))}` : ""}</div></div>
+    </div>`).join("") + `<div class="empty">The top 20 are highlighted on the map.</div>`;
+  results.classList.add("open");
+  results.querySelectorAll(".result").forEach(el => el.onclick = () => choose(+el.dataset.k));
+  frameGroup(hits.slice(0, 12));
+}
+
+function frameGroup(group) {
+  const xs = group.map(q => q.x), ys = group.map(q => q.y);
+  const spanX = Math.max(60, Math.max(...xs) - Math.min(...xs));
+  const spanY = Math.max(60, Math.max(...ys) - Math.min(...ys));
+  const left = width > 700 ? 420 : 0;
+  const scale = Math.min(homeScale * 6, Math.max(homeScale, Math.min((width - left - 100) / spanX, (height - 160) / spanY)));
+  flyTo((Math.max(...xs) + Math.min(...xs)) / 2 - left / 2 / scale, (Math.max(...ys) + Math.min(...ys)) / 2, scale);
+}
+
+input.addEventListener("input", () => {
+  if (mode === "title") showResults();
+  else if (!input.value.trim()) { moodHits = null; draw(); showExamples(); }
+});
+input.addEventListener("focus", () => {
+  if (mode === "mood" && !input.value.trim()) showExamples();
+  else if (mode === "title" && input.value.trim() && !selected) showResults();
+});
 input.addEventListener("keydown", e => {
   const items = results.querySelectorAll(".result[data-k]");
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -750,7 +902,10 @@ input.addEventListener("keydown", e => {
     active = (active + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
     items.forEach((el, k) => el.classList.toggle("active", k === active));
   } else if (e.key === "Enter") {
-    choose(active);
+    // In mood mode, Enter searches when the text is new, and otherwise opens
+    // the highlighted result, like title mode.
+    if (mode === "mood" && input.value.trim() !== lastMood) runMood(input.value);
+    else choose(active);
   } else if (e.key === "Escape") {
     results.classList.remove("open");
     input.blur();

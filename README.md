@@ -28,7 +28,9 @@ uv run evaluate.py                # neighbours for a few known shows plus a scor
 uv run evaluate.py "Mob Psycho" "Monster"
 ```
 
-`evaluate.py` scores the vectors against AniList's own user recommendations. For each series, it measures what share of the shows users recommend appear in our 20 nearest neighbours. It also reports what the score would be with each block removed.
+AniList's user recommendations are also a block: shows that users recommend together, or that share recommendations, move closer.
+
+`evaluate.py` scores the vectors against AniList's user recommendations. Because recommendations are also an ingredient, it holds out a fixed fifth of recommendation pairs, rebuilds without them, and scores only on those. For each series, it measures what share of the shows users recommend appear in our 20 nearest neighbours. It also reports what the score would be with each block removed.
 
 ## Stage 3: layout and clusters
 
@@ -40,6 +42,6 @@ uv run reduce.py
 
 ## Stage 4: the map
 
-Open `index.html` in a browser. No server or build step is needed. Type any title into the search box: English, romaji, an abbreviation like AoT, a season title or a misspelling all work. Pick a show to see its 20 most similar shows in the side panel, with lines to them on the map, and click any of them to keep exploring. Scroll or pinch to zoom, drag to pan, and press `/` to jump to search.
+Open `index.html` in a browser. No server or build step is needed. Type any title into the search box: English, romaji, an abbreviation like AoT, a season title or a misspelling all work. Switch the search to "By mood" to describe what you want ("cozy cooking in a fantasy world") instead of naming a show. The page then downloads a small language model, about 34 MB, the first time, and matches your description against every show's synopsis, genres and themes. `reduce.py` writes the show side of that search to `mood.js`. Pick a show to see its 20 most similar shows in the side panel, with lines to them on the map, and click any of them to keep exploring. Scroll or pinch to zoom, drag to pan, and press `/` to jump to search.
 
 To rebuild everything after a change: `uv run vectors.py && uv run reduce.py`, then reload the page.
