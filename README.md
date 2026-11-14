@@ -1,6 +1,6 @@
 # Animap
 
-Animap is an interactive 2D map of anime, where shows that are similar sit close together. It follows the approach of Mikey Guinness's [movie map](https://mikeyguinness.com/projects/movie-map/), using AniList as the data source instead of TMDB.
+Animap is an interactive 2D map of anime, where shows that are similar sit close together. Try it at https://aishraq.github.io/animap/. It follows the approach of Mikey Guinness's [movie map](https://mikeyguinness.com/projects/movie-map/), using AniList as the data source instead of TMDB.
 
 The pipeline is three Python scripts and one HTML page. Dependencies are managed with uv; run `uv sync` once.
 
