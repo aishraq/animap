@@ -2,7 +2,7 @@
 
 ## Current status and next step
 
-Stage 1 (fetch) is written. At the user's request we are working with the 1,000 most popular anime (data/sample.db, fetched 14 Nov 2026) rather than the full catalogue for now. All four stages now work end to end on that set. Stage 2 turns the 1,000 entries into 682 series with 876 features. Stage 3 produces 31 clusters, with 15 per cent of series unclustered. Opening index.html gives a working map with fuzzy search, a similar-shows panel, hover tooltips, pan and zoom. It was checked in Chrome on 14 Nov 2026 with no console errors. The user decided on 14 Nov 2026 that a set of about 1,000 is enough and that no full catalogue fetch is needed. The set is now chosen as 1,000 series rather than 1,000 entries. They come from a pool of the top 3,000 entries by popularity (data/sample.db, fetched 14 Nov 2026), ranked by a blend of popularity, favourites and score. The map has 1,000 points and 35 clusters.
+Stage 1 (fetch) is written. At the user's request we are working with the 1,000 most popular anime (data/sample.db, fetched 14 Nov 2026) rather than the full catalogue for now. All four stages now work end to end on that set. Stage 2 turns the 1,000 entries into 682 series with 876 features. Stage 3 produces 31 clusters, with 15 per cent of series unclustered. Opening index.html gives a working map with fuzzy search, a similar-shows panel, hover tooltips, pan and zoom. It was checked in Chrome on 14 Nov 2026 with no console errors. The user decided on 14 Nov 2026 that a set of about 1,000 is enough and that no full catalogue fetch is needed. The set is now chosen as 1,000 series rather than 1,000 entries. They come from a pool of the top 3,000 entries by popularity (data/sample.db, fetched 14 Nov 2026), ranked by a blend of popularity, favourites and score, adjusted for era. The map has 1,000 points and 30 clusters. Tag weighting, cluster labels and the layout were tuned on 14 Nov 2026 (see the tuning log). Studio weight is deliberately left open at the user's request. Next is publishing on GitHub Pages, which is waiting on the user's confirmation of the repo name and public visibility.
 
 ## Design decisions
 
@@ -52,12 +52,20 @@ The franchise relations changed. In the bigger pool, SPIN_OFF and PARENT chained
 
 The recommendation score is now 39.6 per cent, against 45.5 per cent before. The two numbers aren't comparable: there are 1,000 candidates instead of 682 (random falls from 2.9 to 2.0 per cent), and more of each show's recommendations are now inside the set. Known weak spot: Space Brothers matches workplace comedies (Servant x Service, Blend-S) through the shared Work tag, ahead of Planetes.
 
+## Tuning log (14 Nov 2026, later session)
+
+Classics: `fetch.py --add SORT N --before YEAR --min-popularity P` adds entries to the pool without touching its state. We added the top 300 pre-2000 entries by SCORE_DESC and by FAVOURITES_DESC (popularity above 5,000), which brought 235 new entries into a pool of 3,235. On their own they barely reached the map (49 pre-2000 series), because raw popularity crowds them out. ERA_MIX = 0.5 now blends each series' popularity and favourites rank within its decade with its overall rank. That lifts pre-2000 series to 72, adding Escaflowne, Now and Then Here and There, Outlaw Star, Patlabor, The Big O, Macross, Fist of the North Star, Maison Ikkoku and Pom Poko, and drops mostly forgettable 2010s filler. The benchmark was unchanged.
+
+Tags: a sweep over rank power, a minimum rank cut-off and a 15-tag generic list (Heterosexual, Urban, Work and so on, at 0.3) settled on TAG_RANK_POWER = 2. Squaring the rank lifted the benchmark from 39.6 to 40.5 per cent and put Planetes first for Space Brothers. The generic list and the cut-off didn't help on top of that, so GENERIC_TAGS is empty but kept as a knob. Remaining misses (Bebop not listing Samurai Champloo, Death Note not listing Code Geass) are tone and creator connections the metadata doesn't capture. Bebop's list also pulls in several Sunrise Gundam series, which bears on the open studio weight question.
+
+Cluster labels skip the Cast-Main Cast, Technical and Demographic tag categories plus a short list (Heterosexual, Urban, Nudity, Kuudere, Tsundere, Primarily Male/Female Cast). vectors.py now writes data/tag_categories.json for this.
+
+Layout: with UMAP at 15 neighbours and min_dist 0.1, sports, music and mecha floated off as distant islands. Five variants were compared in Chrome (15, 30 and 50 neighbours; 50 with min_dist 0.3 and 0.6). The choice is 50 neighbours with min_dist 0.6, which gives one continuous map where clusters still stand apart. The settings can be overridden with the UMAP_NEIGHBORS and UMAP_MIN_DIST environment variables. Clustering is unaffected, because it uses its own 10-dimensional embedding.
+
+The page now credits AniList in its footer.
+
 ## Open items
 
-1. Era bias: only about 46 of the 1,000 series are from before 2000. If that matters, fetch a few hundred top entries by SCORE_DESC or FAVOURITES_DESC above a popularity floor and add them to the pool.
-2. Decide on a popularity floor and which formats to drop (MUSIC, possibly very short specials) before vectorising.
-3. Decide whether SPIN_OFF and ALTERNATIVE should join franchises; check the largest connected components.
-4. Choose per-category tag weights.
-5. Decide the studio weight versus recommendation score trade-off. Re-run the weight sweep on the full catalogue, where staff overlap should matter more.
-6. Cluster labels lean on generic tags (Female Harem, Heterosexual, Primarily Male Cast); consider excluding cast-category tags from labels.
-7. UMAP leaves small outlying islands (sports, music); consider a higher n_neighbors or a larger spread at full scale.
+1. Publish on GitHub Pages (waiting on the user's confirmation of repo name and visibility).
+2. Studio weight: kept open at the user's request. The plan is to compare two maps (light and heavy studio weight) by eye on shows the user knows, rather than tuning to the benchmark, which undervalues "same studio, same feel".
+3. Neighbour misses that the metadata can't see (Bebop and Samurai Champloo, Death Note and Code Geass). AniList user recommendations could be blended into the similarity directly, rather than used only for evaluation, if this matters.

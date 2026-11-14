@@ -1,7 +1,9 @@
 """Stage 1: fetch anime metadata from the AniList GraphQL API into SQLite.
 
 Usage:
-    uv run fetch.py --sample 200    # popular-first sample into data/sample.db
+    uv run fetch.py --sample 3000   # popular-first pool into data/sample.db
+    uv run fetch.py --add SCORE_DESC 300 --before 2000 --min-popularity 5000
+                                    # add extra entries to that pool
     uv run fetch.py                 # full catalogue into data/animap.db, resumable
     uv run fetch.py --reset         # forget progress and start the full fetch over
 
@@ -25,10 +27,10 @@ API_URL = "https://graphql.anilist.co"
 DATA_DIR = Path(__file__).parent / "data"
 
 QUERY = """
-query ($page: Int, $perPage: Int, $sort: [MediaSort]) {
+query ($page: Int, $perPage: Int, $sort: [MediaSort], $minPopularity: Int, $startBefore: FuzzyDateInt) {
   Page(page: $page, perPage: $perPage) {
     pageInfo { currentPage hasNextPage }
-    media(type: ANIME, isAdult: false, sort: $sort) {
+    media(type: ANIME, isAdult: false, sort: $sort, popularity_greater: $minPopularity, startDate_lesser: $startBefore) {
       id idMal
       title { romaji english native }
       synonyms
@@ -159,17 +161,46 @@ def run(db_path, sort, per_page, rpm, limit=None, reset=False, clear=False):
             page_number += 1
 
 
+def add(db_path, sort, count, per_page, rpm, min_popularity=None, before=None):
+    """Add the top `count` entries for another sort order to an existing pool.
+
+    Rows already present are simply refreshed, and the pool's own progress
+    state is left alone.
+    """
+    conn = open_db(db_path)
+    existing = conn.execute("SELECT COUNT(*) FROM media").fetchone()[0]
+    limiter = RateLimiter(rpm)
+    variables = {"perPage": per_page, "sort": [sort], "minPopularity": min_popularity, "startBefore": before * 10000 if before else None}
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with httpx.Client(timeout=60, headers={"User-Agent": "animap/0.1"}) as client:
+        for page_number in range(1, -(-count // per_page) + 1):
+            page = post_with_retry(client, limiter, {**variables, "page": page_number})
+            rows = [(m["id"], json.dumps(m, ensure_ascii=False), now) for m in page["media"]]
+            with conn:
+                conn.executemany("INSERT OR REPLACE INTO media VALUES (?, ?, ?)", rows)
+            print(f"{sort} page {page_number}: {len(rows)} entries")
+            if not page["pageInfo"]["hasNextPage"]:
+                break
+    after = conn.execute("SELECT COUNT(*) FROM media").fetchone()[0]
+    print(f"added {after - existing} new entries ({after} in {db_path.name})")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--sample", type=int, help="fetch roughly N popular entries into data/sample.db")
     parser.add_argument("--per-page", type=int, default=50)
     parser.add_argument("--rpm", type=float, default=28, help="requests per minute (AniList currently allows 30)")
     parser.add_argument("--reset", action="store_true", help="discard saved progress and start over")
+    parser.add_argument("--add", nargs=2, metavar=("SORT", "N"), help="add the top N entries by an AniList sort (e.g. SCORE_DESC) to data/sample.db")
+    parser.add_argument("--min-popularity", type=int, help="with --add: only entries above this popularity")
+    parser.add_argument("--before", type=int, help="with --add: only entries that started before this year")
     args = parser.parse_args()
 
     DATA_DIR.mkdir(exist_ok=True)
     try:
-        if args.sample:
+        if args.add:
+            add(DATA_DIR / "sample.db", args.add[0], int(args.add[1]), args.per_page, args.rpm, args.min_popularity, args.before)
+        elif args.sample:
             run(DATA_DIR / "sample.db", "POPULARITY_DESC", args.per_page, args.rpm, limit=args.sample, clear=True)
         else:
             run(DATA_DIR / "animap.db", "ID", args.per_page, args.rpm, reset=args.reset)

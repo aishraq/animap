@@ -47,7 +47,8 @@ def recall(order, targets):
 
 def find(series, query):
     query = query.lower()
-    matches = [i for i, s in enumerate(series) if any(query in t.lower() for t in s["titles"])]
+    exact = [i for i, s in enumerate(series) if any(query == t.lower() for t in s["titles"])]
+    matches = exact or [i for i, s in enumerate(series) if any(query in t.lower() for t in s["titles"])]
     return max(matches, key=lambda i: series[i]["popularity"]) if matches else None
 
 

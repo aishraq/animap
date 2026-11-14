@@ -52,11 +52,28 @@ FRANCHISE_RELATIONS = {"SEQUEL", "PREQUEL", "SIDE_STORY", "SUMMARY", "COMPILATIO
 TARGET_SERIES = 1000
 SELECTION_WEIGHTS = {"popularity": 0.6, "favourites": 0.2, "score": 0.2}
 
+# AniList's audience is young and has grown over time, so raw popularity and
+# favourites undercount older shows. ERA_MIX blends in each series' rank within
+# its own decade (1980s and earlier, 1990s, 2000s, 2010s, 2020s); 0 turns it off.
+ERA_MIX = 0.5
+
 DROP_FORMATS = {"MUSIC"}
 
 # Broad cast descriptors (Male Protagonist, Primarily Teen Cast) say little about
 # what a show is like, so they count for less than theme and setting tags.
 TAG_CATEGORY_WEIGHTS = {"Cast-Main Cast": 0.5, "Cast-Traits": 0.5, "Technical": 0.5}
+
+# Individual tags that are broad enough to pull unrelated shows together, as
+# {name: multiplier}. Tried a list of 15 (Heterosexual, Urban, Work...) at 0.3:
+# it didn't beat TAG_RANK_POWER alone, so it's empty but kept as a knob.
+GENERIC_TAGS = {}
+
+# Squaring the rank makes the tags that define a show (rank 90: 0.81) count for
+# far more than incidental ones (rank 40: 0.16). On the 1,000 series this lifted
+# the recommendation score from 39.6% to 40.5% and fixed Space Brothers matching
+# workplace comedies ahead of Planetes. A minimum rank cut-off didn't help.
+TAG_MIN_RANK = 0
+TAG_RANK_POWER = 2.0
 
 STAFF_ROLES = {"Director", "Chief Director", "Series Director", "Series Composition", "Script", "Music"}
 
@@ -97,9 +114,35 @@ def select_series(series, target):
     popularity = np.array([members[0]["popularity"] for members in series], dtype=float)
     favourites = np.array([max(m["favourites"] for m in members) for members in series], dtype=float)
     score = np.array([series_score(members) or 0 for members in series], dtype=float)
-    blend = sum(SELECTION_WEIGHTS[name] * rankdata(values) / len(values) for name, values in [("popularity", popularity), ("favourites", favourites), ("score", score)])
+    years = np.array([series_year(members) or 2030 for members in series])
+    era = np.select([years < 1990, years < 2000, years < 2010, years < 2020], [1980, 1990, 2000, 2010], 2020)
+
+    def overall(values):
+        return rankdata(values) / len(values)
+
+    def within_era(values):
+        ranks = np.zeros(len(values))
+        for e in np.unique(era):
+            members = era == e
+            ranks[members] = rankdata(values[members]) / members.sum()
+        return ranks
+
+    def era_adjusted(values):
+        return (1 - ERA_MIX) * overall(values) + ERA_MIX * within_era(values)
+
+    blend = (
+        SELECTION_WEIGHTS["popularity"] * era_adjusted(popularity)
+        + SELECTION_WEIGHTS["favourites"] * era_adjusted(favourites)
+        + SELECTION_WEIGHTS["score"] * overall(score)
+    )
     keep = np.argsort(-blend)[:target]
     return [series[i] for i in sorted(keep, key=lambda i: -popularity[i])]
+
+
+def series_year(members):
+    years = [m["seasonYear"] or m["startDate"]["year"] for m in members]
+    years = [y for y in years if y]
+    return min(years) if years else None
 
 
 def series_score(members):
@@ -116,7 +159,10 @@ def entry_features(m):
     for t in m["tags"]:
         if t["isMediaSpoiler"] or t["isGeneralSpoiler"]:
             continue
-        tags[t["name"]] = t["rank"] / 100 * TAG_CATEGORY_WEIGHTS.get(t["category"], 1.0)
+        if t["rank"] < TAG_MIN_RANK:
+            continue
+        weight = TAG_CATEGORY_WEIGHTS.get(t["category"], 1.0) * GENERIC_TAGS.get(t["name"], 1.0)
+        tags[t["name"]] = (t["rank"] / 100) ** TAG_RANK_POWER * weight
 
     genres = {g: 1.0 for g in m["genres"]}
 
@@ -225,31 +271,38 @@ def series_metadata(members, top_tags):
     }
 
 
-def main():
-    db_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DATA_DIR / "sample.db"
+def build(db_path, verbose=True):
+    """Return the weighted matrix, its feature names and the selected series."""
+    say = print if verbose else (lambda *a, **k: None)
     media = load_media(db_path)
     for m in media:
         m["_features"] = entry_features(m)
 
     series = group_franchises(media)
-    print(f"{len(media)} entries collapsed into {len(series)} series")
+    say(f"{len(media)} entries collapsed into {len(series)} series")
     series = select_series(series, TARGET_SERIES)
-    print(f"kept the top {len(series)} by {SELECTION_WEIGHTS}")
+    say(f"kept the top {len(series)} by {SELECTION_WEIGHTS}, era mix {ERA_MIX}")
     for members in sorted(series, key=len, reverse=True)[:8]:
-        print(f"  {len(members):>3}  {members[0]['title']['romaji']}")
+        say(f"  {len(members):>3}  {members[0]['title']['romaji']}")
 
     blocks, names = [], []
     for block in ["tags", "genres", "studios", "staff", "format"]:
         matrix, feature_names = build_block(series, block, MIN_SERIES.get(block, 1))
         blocks.append(l2_rows(matrix) * BLOCK_WEIGHTS[block])
         names += feature_names
-        print(f"{block:<8} {matrix.shape[1]:>5} features")
+        say(f"{block:<8} {matrix.shape[1]:>5} features")
     numeric, numeric_names = numeric_block(series)
     blocks.append(numeric * BLOCK_WEIGHTS["numeric"])
     names += numeric_names
 
     X = np.hstack(blocks)
-    print(f"vector matrix {X.shape}")
+    say(f"vector matrix {X.shape}")
+    return X, names, series, media
+
+
+def main():
+    db_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DATA_DIR / "sample.db"
+    X, names, series, media = build(db_path)
 
     tag_count = sum(1 for n in names if n.startswith("tags:"))
     metadata = []
@@ -261,6 +314,9 @@ def main():
     np.savez_compressed(DATA_DIR / "vectors.npz", X=X, feature_names=np.array(names))
     with open(DATA_DIR / "series.json", "w") as f:
         json.dump(metadata, f, ensure_ascii=False)
+    categories = {t["name"]: t["category"] for m in media for t in m["tags"]}
+    with open(DATA_DIR / "tag_categories.json", "w") as f:
+        json.dump(categories, f, ensure_ascii=False)
     print(f"wrote {DATA_DIR / 'vectors.npz'} and {DATA_DIR / 'series.json'}")
 
 

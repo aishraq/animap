@@ -15,6 +15,7 @@ either merges almost everything or leaves half the shows unclustered.
 """
 
 import json
+import os
 import warnings
 from pathlib import Path
 
@@ -29,13 +30,28 @@ K = 20
 PCA_COMPONENTS = 50
 SEED = 42
 
+# Layout settings. With 15 neighbours and min_dist 0.1, sports, music and mecha
+# floated off as far islands. 50 neighbours weighs global structure more and
+# min_dist 0.6 spreads points out, giving one continuous map where clusters
+# still stand apart. Both can be overridden with environment variables.
+UMAP_NEIGHBORS = int(os.environ.get("UMAP_NEIGHBORS", 50))
+UMAP_MIN_DIST = float(os.environ.get("UMAP_MIN_DIST", 0.6))
+
+# Tags that describe the cast or the production rather than what a show is
+# about make poor cluster names ("Male Protagonist", "CGI"), so labels skip them.
+LABEL_SKIP_CATEGORIES = {"Cast-Main Cast", "Technical", "Demographic"}
+LABEL_SKIP_TAGS = {"Heterosexual", "Urban", "Nudity", "Kuudere", "Tsundere", "Primarily Male Cast", "Primarily Female Cast"}
+
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 
-def cluster_labels(X, names, clusters):
+def cluster_labels(X, names, clusters, categories):
     """Name each cluster after the tags most over-represented in it."""
-    tag_cols = np.array([n.startswith("tags:") for n in names])
+    def usable(tag):
+        return tag not in LABEL_SKIP_TAGS and categories.get(tag) not in LABEL_SKIP_CATEGORIES
+
+    tag_cols = np.array([n.startswith("tags:") and usable(n.removeprefix("tags:")) for n in names])
     tags = X[:, tag_cols]
     tag_names = [n.removeprefix("tags:") for n in names[tag_cols]]
     present = tags > 0
@@ -68,7 +84,7 @@ def main():
     reduced = PCA(n_components=n_components, random_state=SEED).fit_transform(unit)
     print(f"PCA to {n_components} components")
 
-    xy = umap.UMAP(n_neighbors=15, min_dist=0.1, random_state=SEED).fit_transform(reduced)
+    xy = umap.UMAP(n_neighbors=UMAP_NEIGHBORS, min_dist=UMAP_MIN_DIST, random_state=SEED).fit_transform(reduced)
     xy = (xy - xy.min(axis=0)) / (xy.max(axis=0) - xy.min(axis=0)).max() * 1000
 
     cluster_space = umap.UMAP(n_components=10, n_neighbors=15, min_dist=0.0, random_state=SEED).fit_transform(reduced)
@@ -86,7 +102,9 @@ def main():
         if len(votes):
             soft[i] = np.bincount(votes).argmax()
 
-    labels = cluster_labels(X, names, clusters)
+    with open(DATA_DIR / "tag_categories.json") as f:
+        categories = json.load(f)
+    labels = cluster_labels(X, names, clusters, categories)
     cluster_info = []
     for c in sorted(labels):
         members = clusters == c
