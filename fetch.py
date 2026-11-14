@@ -34,6 +34,7 @@ query ($page: Int, $perPage: Int, $sort: [MediaSort], $minPopularity: Int, $star
       id idMal
       title { romaji english native }
       synonyms
+      description(asHtml: false)
       format episodes duration status source
       seasonYear startDate { year month }
       genres

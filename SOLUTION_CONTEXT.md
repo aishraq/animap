@@ -64,7 +64,31 @@ Layout: with UMAP at 15 neighbours and min_dist 0.1, sports, music and mecha flo
 
 The page now credits AniList in its footer.
 
+## Redesign log (14 Nov 2026)
+
+The user found the first page too formal and asked for an anime-friendly look and for star size to reflect score. They chose a "night sky, neon" direction and score-based size with a toggle.
+
+The design concept is a star chart. Shows are glowing stars on an indigo sky, clusters are constellations with rounded tags, and selecting a show draws its constellation in sakura pink out to its 20 neighbours. That draw-in, plus the camera flight, is the only motion, and both are skipped under reduced motion. The page uses one typeface, M PLUS Rounded 1c from Google Fonts, chosen because it is rounded and covers Japanese; it falls back to system rounded fonts offline. The palette is indigo #15132e, moon #ecebff, lilac #9d99cc, sakura #ff7eb6, ice #72e6ff, plus 16 neon pastels for clusters. The panel has a blurred cover banner, the native Japanese title, a score badge in three tiers (82 and above, 72 to 81, below 72) and a "Watch next" grid of poster cards with a match percentage. On phones (700px and narrower) the panel becomes a bottom sheet. Generic tells were removed: meta strings joined with middle dots, the all-caps section label, and dot-joined cluster names, which are now comma lists.
+
+Star size defaults to score, stretched over 62 to 88 with a 1.5 power, because the middle 90 per cent of scores fall between 63 and 84 and a linear size would show almost no difference. The switch to popularity is remembered per viewer in localStorage. Stars are drawn from one pre-rendered glow sprite per colour, not canvas shadows, to keep panning smooth.
+
+Data changes: series now carry the native title (it is also searchable), and the displayed year is the year of the named entry rather than the franchise's earliest, so Hunter x Hunter (2011) no longer shows 1998. The earliest year is still used for the era-adjusted selection.
+
+Match percentages were later rescaled (see below).
+
+## Synopsis log (14 Nov 2026)
+
+The fetch now pulls `description(asHtml: false)`, and the whole pool was refetched: 3,235 entries, every one with a synopsis. The previous pool is kept as data/sample_backup.db. synopsis.py cleans each synopsis (HTML, entities, spoiler markup, "(Source: ...)" credits, trailing notes) and embeds it with BAAI/bge-small-en-v1.5 through sentence-transformers. The embeddings are 384-dimensional and run locally on the Mac's GPU, and they are cached in data/synopsis_cache.npz by text hash. Each series uses the earliest entry's synopsis of at least 80 characters, because later seasons spoil earlier ones or assume context. Raw sentence embeddings sit in a narrow cone, so they are mean-centred before L2 normalisation.
+
+Weight sweep (benchmark): no synopsis 40.5%; 0.3 gave 40.9%; 0.5 gave 41.5%; 0.7 gave 42.0%; 1.0 gave 42.0%; 1.5 gave 38.0%; synopsis alone gave 16.1%. Chosen: 0.7. Synopses match on premise, not tone. On its own, Death Note's nearest synopsis is Love Tyrant (a romcom about a Death Note-style notebook), and Frieren's are isekai shows that also open "after the hero defeats the demon lord". As one ingredient among several it helps: Bebop gains Trigun, and Death Note gains Erased. Tower of God gets slightly worse (it gains two isekai and loses Hunter x Hunter), and Frieren is unchanged. In the ablation, removing the synopsis now costs 1.6 points, more than genres (1.4). The hard pairs (Bebop and Samurai Champloo, Death Note and Code Geass) still don't connect.
+
+## Match scores and synopsis display (14 Nov 2026)
+
+Match percentages used to be raw cosine similarity, so a typical best match read about 49% and some fell below 40%. At the user's request they are rescaled in reduce.py (match_scores). The median of all pairs maps to 0, the 95th percentile of best-match similarities maps to 100, and a square root spreads the middle. A typical best match now reads 86 (5th to 95th percentile: 74 to 100), and a typical 20th match reads 67. Ordering is unchanged. The page shows these as "% match" on the posters. The scale is relative to this map's own data, so it shifts if the pool or weights change.
+
+The panel now shows each series' cleaned synopsis, the same text used for the embedding. It is cut to five lines, with a "Read more" button that appears only when the text is truncated. The data file grew from 1.1 to 1.6 MB.
+
 ## Open items
 
 1. Studio weight: kept open at the user's request. The plan is to compare two maps (light and heavy studio weight) by eye on shows the user knows, rather than tuning to the benchmark, which undervalues "same studio, same feel".
-2. Neighbour misses that the metadata can't see (Bebop and Samurai Champloo, Death Note and Code Geass). AniList user recommendations could be blended into the similarity directly, rather than used only for evaluation, if this matters.
+2. Neighbour misses that neither metadata nor synopses capture (Bebop and Samurai Champloo, Death Note and Code Geass). The remaining lever is blending AniList user recommendations into the similarity directly. That would make the benchmark circular, so it would need a held-out split to evaluate.

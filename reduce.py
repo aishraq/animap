@@ -66,6 +66,22 @@ def cluster_labels(X, names, clusters, categories):
     return labels
 
 
+def match_scores(sims, neighbour_sims):
+    """Turn raw cosine similarities into a friendlier 0-100 match score.
+
+    Raw similarities run low (a typical best match is about 0.49), which reads
+    as a weak recommendation. The scale is anchored on the data instead: a
+    typical unrelated pair (the median of all pairs) is 0, and the closest 5%
+    of best matches are 100. A square root spreads out the middle, so a typical
+    best match reads in the 80s and a 20th match in the 60s.
+    """
+    off_diagonal = sims[np.triu_indices(len(sims), 1)]
+    low = np.median(off_diagonal)
+    high = np.percentile(neighbour_sims[:, 0], 95)
+    scaled = np.clip((neighbour_sims - low) / (high - low), 0, 1)
+    return np.round(100 * np.sqrt(scaled)).astype(int)
+
+
 def main():
     vectors = np.load(DATA_DIR / "vectors.npz")
     X = vectors["X"]
@@ -79,6 +95,7 @@ def main():
     np.fill_diagonal(sims, -np.inf)
     neighbours = np.argsort(-sims, axis=1)[:, :K]
     neighbour_sims = np.take_along_axis(sims, neighbours, axis=1)
+    match = match_scores(sims, neighbour_sims)
 
     n_components = min(PCA_COMPONENTS, unit.shape[0] - 1, unit.shape[1])
     reduced = PCA(n_components=n_components, random_state=SEED).fit_transform(unit)
@@ -110,7 +127,7 @@ def main():
         members = clusters == c
         cluster_info.append({
             "id": int(c),
-            "label": " · ".join(labels[c]),
+            "label": ", ".join(labels[c]),
             "x": round(float(np.median(xy[members, 0])), 1),
             "y": round(float(np.median(xy[members, 1])), 1),
             "size": int(members.sum()),
@@ -122,6 +139,7 @@ def main():
             "id": s["id"],
             "title": s["title"],
             "romaji": s["romaji"],
+            "native": s["native"],
             "titles": s["titles"],
             "parts": len(s["members"]),
             "x": round(float(xy[i, 0]), 1),
@@ -139,7 +157,8 @@ def main():
             "cover": s["cover"],
             "url": s["url"],
             "nn": neighbours[i].tolist(),
-            "nnSim": [round(float(v), 3) for v in neighbour_sims[i]],
+            "nnMatch": match[i].tolist(),
+            "synopsis": s["synopsis"],
         })
 
     payload = json.dumps({"clusters": cluster_info, "points": points}, ensure_ascii=False, separators=(",", ":"))

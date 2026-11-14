@@ -27,6 +27,8 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 from scipy.stats import rankdata
 
+from synopsis import embed, pick_synopsis
+
 DATA_DIR = Path(__file__).parent / "data"
 
 BLOCK_WEIGHTS = {
@@ -36,6 +38,11 @@ BLOCK_WEIGHTS = {
     "staff": 0.35,
     "format": 0.15,
     "numeric": 0.15,
+    # Sentence embedding of the first entry's synopsis. Tested 14 Nov 2026: 0.7
+    # lifted the recommendation score from 40.5% to 42.0%; 1.5 dropped it to 38%
+    # and synopsis alone scored 16%, because plot summaries match on premise
+    # (Death Note's nearest synopsis is a romcom parody of it), not feel.
+    "synopsis": 0.7,
 }
 
 # Relations that mean "same story, different instalment". CHARACTER, OTHER,
@@ -231,6 +238,20 @@ def numeric_block(series):
     return matrix.astype(np.float32), ["numeric:year", "numeric:log_episodes", "numeric:log_popularity", "numeric:score"]
 
 
+def synopsis_block(texts, verbose=True):
+    """Sentence embeddings of each series' synopsis, centred then normalised.
+
+    Raw sentence embeddings all sit in a narrow cone (any two synopses score
+    around 0.4 to 0.6), so subtracting the mean first lets the differences
+    between stories drive the similarity.
+    """
+    vectors = embed(texts, verbose)
+    has_text = np.array([bool(t) for t in texts])
+    vectors[has_text] -= vectors[has_text].mean(axis=0)
+    vectors[~has_text] = 0
+    return l2_rows(vectors)
+
+
 def l2_rows(matrix):
     norms = np.linalg.norm(matrix, axis=1, keepdims=True)
     return matrix / np.where(norms > 0, norms, 1)
@@ -248,10 +269,14 @@ def series_metadata(members, top_tags):
         "id": main["id"],
         "title": main["title"]["english"] or main["title"]["romaji"],
         "romaji": main["title"]["romaji"],
+        "native": main["title"]["native"],
+        "synopsis": pick_synopsis(members),
         "titles": sorted(titles),
         "members": [m["id"] for m in members],
         "member_titles": [m["title"]["english"] or m["title"]["romaji"] for m in members],
-        "year": min(years) if years else None,
+        # The year of the entry the series is named after, so "Hunter x Hunter
+        # (2011)" says 2011 even though the 1999 version is in the same series.
+        "year": main["seasonYear"] or main["startDate"]["year"] or (min(years) if years else None),
         "format": main["format"],
         "episodes": sum(m["episodes"] or 0 for m in members),
         "score": round(series_score(members)) if series_score(members) else None,
@@ -294,6 +319,13 @@ def build(db_path, verbose=True):
     numeric, numeric_names = numeric_block(series)
     blocks.append(numeric * BLOCK_WEIGHTS["numeric"])
     names += numeric_names
+
+    if BLOCK_WEIGHTS["synopsis"] > 0:
+        texts = [pick_synopsis(members) for members in series]
+        matrix = synopsis_block(texts, verbose)
+        blocks.append(matrix * BLOCK_WEIGHTS["synopsis"])
+        names += [f"synopsis:{j}" for j in range(matrix.shape[1])]
+        say(f"synopsis {matrix.shape[1]:>5} dims, {sum(1 for t in texts if not t)} series without one")
 
     X = np.hstack(blocks)
     say(f"vector matrix {X.shape}")

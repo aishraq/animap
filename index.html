@@ -4,73 +4,140 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Animap</title>
+<meta name="description" content="A star map of anime. Find a show you love and see what to watch next.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;500;700;800&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0f1117;
-    --panel: #171a23ee;
-    --panel-solid: #171a23;
-    --line: #2a2f3d;
-    --text: #e8e6e3;
-    --muted: #8b90a0;
-    --accent: #ffb454;
+    --night: #15132e;
+    --night-deep: #0e0c22;
+    --surface: rgba(30, 27, 64, .9);
+    --surface-solid: #1e1b40;
+    --raised: #29255a;
+    --edge: #39347a;
+    --moon: #ecebff;
+    --lilac: #9d99cc;
+    --sakura: #ff7eb6;
+    --ice: #72e6ff;
+    --font: "M PLUS Rounded 1c", ui-rounded, "Hiragino Maru Gothic ProN", system-ui, sans-serif;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--night); color: var(--moon); font: 500 14px/1.5 var(--font); }
   canvas { position: fixed; inset: 0; width: 100%; height: 100%; cursor: grab; touch-action: none; }
   canvas.dragging { cursor: grabbing; }
   canvas.pointing { cursor: pointer; }
+  button, input { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
+  a { color: var(--ice); text-decoration: none; }
+  a:hover { text-decoration: underline; }
 
-  #search { position: fixed; top: 16px; left: 16px; width: min(380px, calc(100vw - 32px)); z-index: 3; }
-  #search input { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-solid); color: var(--text); font-size: 15px; outline: none; }
-  #search input:focus { border-color: var(--accent); }
-  #results { margin-top: 6px; background: var(--panel-solid); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: none; }
+  /* Top left: wordmark and search */
+  #top { position: fixed; top: 16px; left: 16px; width: min(380px, calc(100vw - 32px)); z-index: 3; }
+  .wordmark { display: flex; align-items: baseline; gap: 10px; margin: 0 0 10px 4px; user-select: none; }
+  .wordmark b { font-size: 26px; font-weight: 800; letter-spacing: -.01em; background: linear-gradient(100deg, var(--moon) 30%, var(--sakura)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .wordmark span { font-size: 13px; color: var(--lilac); letter-spacing: .12em; }
+  .searchbox { position: relative; }
+  .searchbox svg { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--lilac); pointer-events: none; }
+  #q { width: 100%; padding: 12px 16px 12px 42px; border-radius: 999px; border: 1.5px solid var(--edge); background: var(--surface-solid); font-size: 15px; outline: none; transition: border-color .15s, box-shadow .15s; }
+  #q::placeholder { color: var(--lilac); }
+  #q:focus { border-color: var(--sakura); box-shadow: 0 0 0 4px rgba(255, 126, 182, .15); }
+  #results { margin-top: 8px; background: var(--surface-solid); border: 1.5px solid var(--edge); border-radius: 18px; overflow: hidden; display: none; box-shadow: 0 12px 40px rgba(5, 3, 20, .5); }
   #results.open { display: block; }
-  .result { display: flex; gap: 10px; align-items: center; padding: 8px 10px; cursor: pointer; }
-  .result:hover, .result.active { background: #ffffff10; }
-  .result img { width: 32px; height: 45px; object-fit: cover; border-radius: 4px; background: #222; flex: none; }
-  .result .name { font-weight: 600; }
-  .result .sub { color: var(--muted); font-size: 12px; }
+  .result { display: flex; gap: 12px; align-items: center; padding: 8px 12px; cursor: pointer; }
+  .result:hover, .result.active { background: var(--raised); }
+  .result img { width: 34px; height: 48px; object-fit: cover; border-radius: 8px; background: var(--raised); flex: none; }
+  .result .name { font-weight: 700; line-height: 1.3; }
+  .result .sub { color: var(--lilac); font-size: 12px; }
+  .empty { padding: 12px 16px; color: var(--lilac); font-size: 13px; }
 
-  #panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(380px, 100vw); background: var(--panel); backdrop-filter: blur(8px); border-left: 1px solid var(--line); z-index: 4; overflow-y: auto; transform: translateX(100%); transition: transform .25s ease; }
+  /* Bottom left: star size switch and credit */
+  #bottom { position: fixed; left: 16px; bottom: 14px; z-index: 2; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+  .switch { display: flex; align-items: center; gap: 4px; padding: 4px; border-radius: 999px; background: var(--surface); border: 1.5px solid var(--edge); }
+  .switch span { padding: 0 8px 0 10px; color: var(--lilac); font-size: 12px; }
+  .switch button { border: 0; border-radius: 999px; padding: 5px 12px; background: none; color: var(--lilac); font-size: 12px; font-weight: 700; cursor: pointer; }
+  .switch button[aria-pressed="true"] { background: var(--sakura); color: var(--night-deep); }
+  .credit { color: var(--lilac); font-size: 11px; opacity: .8; }
+
+  /* Right: the show panel */
+  #panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(400px, 100vw); background: var(--surface); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-left: 1.5px solid var(--edge); z-index: 4; overflow-y: auto; overflow-x: hidden; transform: translateX(100%); transition: transform .28s cubic-bezier(.2, .8, .2, 1); }
   #panel.open { transform: none; }
-  #panel .close { position: absolute; top: 10px; right: 12px; background: none; border: 0; color: var(--muted); font-size: 22px; cursor: pointer; }
-  .hero { display: flex; gap: 14px; padding: 20px 20px 12px; }
-  .hero img { width: 92px; height: 130px; object-fit: cover; border-radius: 6px; background: #222; flex: none; }
-  .hero h2 { margin: 0 0 4px; font-size: 18px; line-height: 1.25; padding-right: 18px; }
-  .hero .alt { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
-  .meta { color: var(--muted); font-size: 12px; }
-  .chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 20px 12px; }
-  .chip { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: #ffffff12; color: #cfd2da; }
-  .section { padding: 8px 20px 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); border-top: 1px solid var(--line); margin-top: 4px; }
-  .sim { display: flex; gap: 10px; align-items: center; padding: 6px 20px; cursor: pointer; }
-  .sim:hover { background: #ffffff0d; }
-  .sim img { width: 34px; height: 48px; object-fit: cover; border-radius: 4px; background: #222; flex: none; }
-  .sim .body { flex: 1; min-width: 0; }
-  .sim .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .bar { height: 3px; border-radius: 2px; background: var(--line); margin-top: 4px; }
-  .bar span { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
-  a { color: var(--accent); }
+  .banner { height: 130px; background-size: cover; background-position: center 30%; filter: blur(18px) saturate(1.4); opacity: .55; margin: -20px -20px 0; }
+  .close { position: absolute; top: 12px; right: 12px; width: 34px; height: 34px; border-radius: 50%; border: 0; background: rgba(14, 12, 34, .6); color: var(--moon); font-size: 20px; line-height: 1; cursor: pointer; z-index: 1; }
+  .close:hover { background: var(--sakura); color: var(--night-deep); }
+  .hero { display: flex; gap: 16px; padding: 0 20px; margin-top: -70px; position: relative; }
+  .hero img { width: 104px; height: 148px; object-fit: cover; border-radius: 14px; background: var(--raised); flex: none; box-shadow: 0 10px 30px rgba(5, 3, 20, .6); border: 2px solid rgba(236, 235, 255, .15); }
+  .hero .text { padding-top: 70px; min-width: 0; }
+  .hero h2 { margin: 0; font-size: 20px; font-weight: 800; line-height: 1.2; }
+  .native { color: var(--lilac); font-size: 13px; margin-top: 2px; }
+  .facts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; color: var(--lilac); font-size: 12px; }
+  .score { display: inline-flex; align-items: center; gap: 4px; font-weight: 800; font-size: 13px; padding: 2px 10px; border-radius: 999px; }
+  .score.top { background: rgba(255, 126, 182, .18); color: var(--sakura); }
+  .score.good { background: rgba(114, 230, 255, .14); color: var(--ice); }
+  .score.ok { background: rgba(157, 153, 204, .16); color: var(--lilac); }
+  .about { padding: 14px 20px 4px; }
+  .studio { color: var(--lilac); font-size: 12px; margin-top: 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  .chip { font-size: 12px; padding: 3px 11px; border-radius: 999px; background: var(--raised); color: var(--moon); }
+  .chip.tag { background: none; border: 1.5px solid var(--edge); color: var(--lilac); }
+  .anilist { font-size: 13px; font-weight: 700; }
+  .synopsis { margin: 12px 0 4px; }
+  .synopsis p { margin: 0; font-size: 13px; line-height: 1.65; color: #d4d2f0; display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+  .synopsis.open p { -webkit-line-clamp: unset; display: block; }
+  .more { margin-top: 4px; padding: 0; border: 0; background: none; color: var(--ice); font-size: 12px; font-weight: 700; cursor: pointer; }
+  .watchnext { margin: 18px 20px 10px; font-size: 17px; font-weight: 800; }
+  .watchnext small { display: block; font-size: 12px; font-weight: 500; color: var(--lilac); }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px 10px; padding: 0 20px 28px; }
+  .card { cursor: pointer; border: 0; background: none; padding: 0; text-align: left; min-width: 0; }
+  .poster { position: relative; aspect-ratio: 7 / 10; border-radius: 12px; overflow: hidden; background: var(--raised); transition: transform .15s; }
+  .card:hover .poster, .card:focus-visible .poster { transform: translateY(-3px); }
+  .poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .match { position: absolute; left: 6px; bottom: 6px; font-size: 11px; font-weight: 800; padding: 1px 7px; border-radius: 999px; background: rgba(14, 12, 34, .82); color: var(--sakura); }
+  .card .t { margin-top: 6px; font-size: 12px; font-weight: 700; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .card .y { font-size: 11px; color: var(--lilac); }
 
-  #tooltip { position: fixed; pointer-events: none; z-index: 5; background: var(--panel-solid); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-width: 280px; display: none; }
-  #tooltip .name { font-weight: 600; }
-  #tooltip .sub { color: var(--muted); font-size: 12px; }
+  /* Hover card */
+  #tooltip { position: fixed; pointer-events: none; z-index: 5; display: none; gap: 10px; align-items: center; background: var(--surface-solid); border: 1.5px solid var(--edge); border-radius: 14px; padding: 8px 12px 8px 8px; max-width: 300px; box-shadow: 0 12px 30px rgba(5, 3, 20, .5); }
+  #tooltip img { width: 40px; height: 57px; object-fit: cover; border-radius: 8px; background: var(--raised); flex: none; }
+  #tooltip .name { font-weight: 800; line-height: 1.25; }
+  #tooltip .sub { color: var(--lilac); font-size: 12px; margin-top: 2px; }
+  #tooltip .score { font-size: 11px; padding: 0 7px; margin-left: 4px; }
 
-  #hint { position: fixed; left: 16px; bottom: 14px; color: var(--muted); font-size: 12px; z-index: 2; }
-  #error { position: fixed; inset: 0; display: none; place-items: center; text-align: center; color: var(--muted); padding: 16px; }
+  #error { position: fixed; inset: 0; display: none; place-items: center; text-align: center; color: var(--lilac); padding: 16px; }
+
+  @media (max-width: 700px) {
+    #panel { top: auto; height: 72vh; width: 100vw; border-left: 0; border-top: 1.5px solid var(--edge); border-radius: 22px 22px 0 0; transform: translateY(100%); }
+    .wordmark b { font-size: 22px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #panel, .poster, #q { transition: none; }
+  }
 </style>
 </head>
 <body>
-<canvas id="map"></canvas>
+<canvas id="map" aria-label="Map of anime, where similar shows sit close together"></canvas>
 
-<div id="search">
-  <input id="q" type="search" placeholder="Search an anime you like…" autocomplete="off" spellcheck="false">
-  <div id="results"></div>
+<div id="top">
+  <div class="wordmark"><b>Animap</b><span lang="ja">アニマップ</span></div>
+  <div class="searchbox">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input id="q" type="search" placeholder="Find an anime you love" autocomplete="off" spellcheck="false" aria-label="Search anime by any title">
+  </div>
+  <div id="results" role="listbox"></div>
+</div>
+
+<div id="bottom">
+  <div class="switch" role="group" aria-label="Star size">
+    <span>Star size</span>
+    <button type="button" data-size="score" aria-pressed="true">Score</button>
+    <button type="button" data-size="popularity" aria-pressed="false">Popularity</button>
+  </div>
+  <div class="credit">Scroll to zoom, drag to explore. Data from <a href="https://anilist.co" target="_blank" rel="noopener">AniList</a>.</div>
 </div>
 
 <aside id="panel" aria-live="polite"></aside>
 <div id="tooltip"></div>
-<div id="hint">Scroll to zoom · drag to pan · click a show to see similar ones · data from <a href="https://anilist.co" target="_blank" rel="noopener">AniList</a></div>
-<div id="error">Couldn't find map data. Run <code>uv run reduce.py</code> to create animap.js next to this file.</div>
+<div id="error">The map data is missing. Run <code>uv run reduce.py</code> to create animap.js next to this file.</div>
 
 <script src="animap.js"></script>
 <script>
@@ -83,20 +150,67 @@ if (!data) {
 }
 const points = data.points;
 const clusters = data.clusters;
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const LABEL_FONT = '"M PLUS Rounded 1c", system-ui, sans-serif';
 
 // ---------- colours ----------
 
-const palette = ["#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4", "#46f0f0", "#f032e6", "#bcf60c", "#fabebe", "#008080", "#e6beff", "#9a6324", "#fffac8", "#aaffc3", "#808000", "#ffd8b1", "#7f8cff", "#ff6f91", "#5fd3a5"];
-function clusterColour(c) {
-  if (c < 0) return "#6b7080";
-  return palette[c % palette.length];
-}
+// Neon pastels picked to glow against the indigo night.
+const palette = ["#ff7eb6", "#72e6ff", "#ffd36e", "#a98bff", "#7dffb2", "#ff9f6e", "#6ea8ff", "#f88bff", "#c6ff6e", "#ff6e8a", "#6effe8", "#ffb3d9", "#b3c6ff", "#ffe9a8", "#8affd0", "#d9a8ff"];
+const clusterColour = c => c < 0 ? "#8a86b8" : palette[c % palette.length];
 for (const p of points) {
   p.colour = clusterColour(p.cluster >= 0 ? p.cluster : p.soft);
-  p.faded = p.cluster < 0;
+  p.loose = p.cluster < 0;
 }
 
-// ---------- view transform ----------
+// Each colour gets one pre-rendered glowing star, drawn scaled per point.
+// Much cheaper than canvas shadows on a thousand points every frame.
+const SPRITE = 64;
+const sprites = new Map();
+function sprite(colour) {
+  if (sprites.has(colour)) return sprites.get(colour);
+  const c = document.createElement("canvas");
+  c.width = c.height = SPRITE;
+  const g = c.getContext("2d");
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, "#ffffff");
+  grad.addColorStop(0.12, colour);
+  grad.addColorStop(0.25, colour);
+  grad.addColorStop(0.34, colour + "40");
+  grad.addColorStop(0.6, colour + "10");
+  grad.addColorStop(1, colour + "00");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, SPRITE, SPRITE);
+  sprites.set(colour, c);
+  return c;
+}
+
+// ---------- star size ----------
+
+let sizeMode = "score";
+try { sizeMode = localStorage.getItem("animap-size") || "score"; } catch (e) {}
+
+const maxPop = Math.max(...points.map(p => p.popularity));
+function baseRadius(p) {
+  if (sizeMode === "popularity") return 2.2 + 8 * Math.sqrt(p.popularity / maxPop);
+  if (!p.score) return 2.2;
+  // Most scores sit between 63 and 84, so stretch that band: a 70 stays small,
+  // an 85 is clearly a big star.
+  const t = Math.min(1, Math.max(0, (p.score - 62) / 26));
+  return 2 + 9 * Math.pow(t, 1.5);
+}
+function applySize() {
+  for (const p of points) p.r = baseRadius(p);
+  document.querySelectorAll(".switch button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.size === sizeMode)));
+  draw();
+}
+document.querySelectorAll(".switch button").forEach(b => b.addEventListener("click", () => {
+  sizeMode = b.dataset.size;
+  try { localStorage.setItem("animap-size", sizeMode); } catch (e) {}
+  applySize();
+}));
+
+// ---------- view ----------
 
 const canvas = document.getElementById("map");
 const ctx = canvas.getContext("2d");
@@ -104,8 +218,17 @@ let width = 0, height = 0, dpr = 1;
 const view = { x: 500, y: 500, scale: 1 };
 let homeScale = 1;
 
-const maxPop = Math.max(...points.map(p => p.popularity));
-for (const p of points) p.r = 2.5 + 7 * Math.sqrt(p.popularity / maxPop);
+const toScreen = (x, y) => [(x - view.x) * view.scale + width / 2, (y - view.y) * view.scale + height / 2];
+const toWorld = (sx, sy) => [(sx - width / 2) / view.scale + view.x, (sy - height / 2) / view.scale + view.y];
+const radius = p => p.r * Math.min(2.2, Math.max(0.75, Math.sqrt(view.scale / homeScale)));
+
+// Faint background stars, fixed to the screen so the sky feels deep.
+let dust = [];
+function makeDust() {
+  dust = [];
+  const n = Math.round(width * height / 9000);
+  for (let i = 0; i < n; i++) dust.push([Math.random() * width, Math.random() * height, Math.random() * 0.9 + 0.2, Math.random() * 0.35 + 0.05]);
+}
 
 function resize() {
   dpr = window.devicePixelRatio || 1;
@@ -113,28 +236,26 @@ function resize() {
   height = canvas.clientHeight;
   canvas.width = width * dpr;
   canvas.height = height * dpr;
+  makeDust();
   draw();
 }
 
-// Frame the middle 96% of shows so a few far-off islands don't shrink the view.
+// Frame the middle 96% of shows so a few far-off stars don't shrink the view.
 function fitAll() {
   const pct = (arr, q) => arr[Math.floor(q * (arr.length - 1))];
   const xs = points.map(p => p.x).sort((a, b) => a - b), ys = points.map(p => p.y).sort((a, b) => a - b);
   const minX = pct(xs, 0.02), maxX = pct(xs, 0.98), minY = pct(ys, 0.02), maxY = pct(ys, 0.98);
+  view.scale = 0.88 * Math.min(width / (maxX - minX), (height - 60) / (maxY - minY));
   view.x = (minX + maxX) / 2;
   view.y = (minY + maxY) / 2;
-  view.scale = 0.9 * Math.min(width / (maxX - minX), height / (maxY - minY));
   homeScale = view.scale;
 }
-
-const toScreen = (x, y) => [(x - view.x) * view.scale + width / 2, (y - view.y) * view.scale + height / 2];
-const toWorld = (sx, sy) => [(sx - width / 2) / view.scale + view.x, (sy - height / 2) / view.scale + view.y];
-const radius = p => p.r * Math.min(2.2, Math.max(0.7, Math.sqrt(view.scale / homeScale)));
 
 // ---------- drawing ----------
 
 let hovered = null;
 let selected = null;
+let reveal = 1;
 let drawQueued = false;
 
 function draw() {
@@ -145,22 +266,38 @@ function draw() {
 
 function render() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = "#0f1117";
+  const sky = ctx.createRadialGradient(width * 0.5, height * 0.45, 0, width * 0.5, height * 0.45, Math.max(width, height) * 0.75);
+  sky.addColorStop(0, "#1c1940");
+  sky.addColorStop(1, "#0e0c22");
+  ctx.fillStyle = sky;
   ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "#ecebff";
+  for (const [x, y, r, a] of dust) {
+    ctx.globalAlpha = a;
+    ctx.fillRect(x, y, r, r);
+  }
+  ctx.globalAlpha = 1;
 
-  const neighbourSet = selected ? new Set(selected.nn.map(i => points[i])) : null;
+  const near = selected ? new Set(selected.nn.map(i => points[i])) : null;
 
-  // Lines from the selected show to its similar shows.
+  // The selected show's constellation: lines out to its similar shows, drawn
+  // in when it's picked.
   if (selected) {
     const [sx, sy] = toScreen(selected.x, selected.y);
-    ctx.lineWidth = 1;
+    ctx.lineCap = "round";
     selected.nn.forEach((i, rank) => {
       const q = points[i];
       const [qx, qy] = toScreen(q.x, q.y);
-      ctx.strokeStyle = `rgba(255,180,84,${0.55 - rank * 0.02})`;
+      const t = Math.min(1, Math.max(0, reveal * 1.6 - rank * 0.03));
+      if (t <= 0) return;
+      const grad = ctx.createLinearGradient(sx, sy, qx, qy);
+      grad.addColorStop(0, `rgba(255,126,182,${0.75 - rank * 0.025})`);
+      grad.addColorStop(1, `rgba(255,126,182,${0.25 - rank * 0.01})`);
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = rank < 5 ? 1.6 : 1;
       ctx.beginPath();
       ctx.moveTo(sx, sy);
-      ctx.lineTo(qx, qy);
+      ctx.lineTo(sx + (qx - sx) * t, sy + (qy - sy) * t);
       ctx.stroke();
     });
   }
@@ -168,88 +305,103 @@ function render() {
   for (const p of points) {
     const [x, y] = toScreen(p.x, p.y);
     const r = radius(p);
-    if (x < -r || y < -r || x > width + r || y > height + r) continue;
-    let alpha = p.faded ? 0.45 : 0.85;
-    if (selected && p !== selected && !neighbourSet.has(p)) alpha *= 0.25;
+    if (x < -4 * r || y < -4 * r || x > width + 4 * r || y > height + 4 * r) continue;
+    let alpha = p.loose ? 0.55 : 0.95;
+    if (selected && p !== selected && !near.has(p)) alpha = 0.16;
     ctx.globalAlpha = alpha;
-    ctx.fillStyle = p.colour;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
+    if (sizeMode === "score" && !p.score) {
+      ctx.strokeStyle = p.colour;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(x, y, r + 1, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      const s = r * 6.5;
+      ctx.drawImage(sprite(p.colour), x - s / 2, y - s / 2, s, s);
+    }
   }
   ctx.globalAlpha = 1;
 
-  for (const p of [selected, hovered]) {
+  for (const [p, colour] of [[selected, "#ff7eb6"], [hovered, "#ecebff"]]) {
     if (!p) continue;
     const [x, y] = toScreen(p.x, p.y);
-    ctx.strokeStyle = "#fff";
+    ctx.strokeStyle = colour;
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(x, y, radius(p) + 3, 0, Math.PI * 2);
+    ctx.arc(x, y, radius(p) + 5, 0, Math.PI * 2);
     ctx.stroke();
   }
 
-  drawLabels(neighbourSet);
+  drawLabels(near);
 }
 
-// Titles for the biggest shows that fit on screen without overlapping, plus
-// cluster names when zoomed out. Boxes already drawn block later labels.
-function drawLabels(neighbourSet) {
+const byPopularity = points.slice().sort((a, b) => b.popularity - a.popularity);
+
+// Titles for well-known shows that fit without overlapping, plus constellation
+// names when zoomed out. Boxes already drawn block later labels.
+function drawLabels(near) {
   const boxes = [];
   const fits = (x, y, w, h) => {
+    if (x < 0 || y < 0 || x + w > width || y + h > height) return false;
     for (const b of boxes) if (x < b[0] + b[2] && x + w > b[0] && y < b[1] + b[3] && y + h > b[1]) return false;
     boxes.push([x, y, w, h]);
     return true;
   };
   ctx.textBaseline = "middle";
 
-  const label = (p, bold) => {
+  const label = (p, strong) => {
     const [x, y] = toScreen(p.x, p.y);
-    if (x < 0 || y < 0 || x > width || y > height) return;
-    ctx.font = `${bold ? 600 : 400} 12px system-ui, sans-serif`;
-    const text = p.title.length > 34 ? p.title.slice(0, 33) + "…" : p.title;
+    ctx.font = `${strong ? 800 : 500} 12px ${LABEL_FONT}`;
+    const text = p.title.length > 32 ? p.title.slice(0, 31) + "…" : p.title;
     const w = ctx.measureText(text).width;
-    const lx = x + radius(p) + 4;
-    if (!fits(lx - 2, y - 8, w + 4, 16)) return;
-    ctx.fillStyle = "rgba(15,17,23,.75)";
-    ctx.fillRect(lx - 2, y - 8, w + 4, 16);
-    ctx.fillStyle = bold ? "#fff" : "#c9ccd6";
-    ctx.fillText(text, lx, y);
+    const lx = x + radius(p) + 8;
+    if (!fits(lx - 6, y - 10, w + 12, 20)) return;
+    ctx.fillStyle = strong ? "rgba(255,126,182,.95)" : "rgba(14,12,34,.72)";
+    roundRect(lx - 6, y - 10, w + 12, 20, 10);
+    ctx.fillStyle = strong ? "#0e0c22" : "#d9d7f5";
+    ctx.fillText(text, lx, y + 0.5);
   };
 
   if (selected) {
     label(selected, true);
     for (const i of selected.nn) label(points[i], false);
   }
-  if (hovered) label(hovered, true);
+  if (hovered && hovered !== selected) label(hovered, false);
 
-  // Cluster names fade out as titles take over.
-  const clusterAlpha = Math.max(0, Math.min(1, 2.6 - view.scale / homeScale));
+  const zoom = view.scale / homeScale;
+  const clusterAlpha = Math.max(0, Math.min(1, 2.6 - zoom));
   if (clusterAlpha > 0 && !selected) {
-    ctx.font = "600 13px system-ui, sans-serif";
+    ctx.font = `700 12px ${LABEL_FONT}`;
     ctx.globalAlpha = clusterAlpha;
     for (const c of [...clusters].sort((a, b) => b.size - a.size)) {
       const [x, y] = toScreen(c.x, c.y);
       const w = ctx.measureText(c.label).width;
-      if (!fits(x - w / 2 - 6, y - 10, w + 12, 20)) continue;
-      ctx.fillStyle = "rgba(15,17,23,.7)";
-      ctx.fillRect(x - w / 2 - 6, y - 10, w + 12, 20);
-      ctx.fillStyle = clusterColour(c.id);
-      ctx.fillText(c.label, x - w / 2, y);
+      if (!fits(x - w / 2 - 10, y - 11, w + 20, 22)) continue;
+      const colour = clusterColour(c.id);
+      ctx.fillStyle = "rgba(14,12,34,.78)";
+      roundRect(x - w / 2 - 10, y - 11, w + 20, 22, 11);
+      ctx.strokeStyle = colour + "88";
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.fillStyle = colour;
+      ctx.fillText(c.label, x - w / 2, y + 0.5);
     }
     ctx.globalAlpha = 1;
   }
 
-  // Zoomed out, only the best-known titles get labels; zoomed in, anything that
-  // fits. The overlap check does the thinning either way.
-  const zoom = view.scale / homeScale;
+  // Zoomed out, only the best-known titles; zoomed in, anything that fits.
   const limit = zoom < 1.8 ? 15 : zoom < 3.5 ? 60 : points.length;
   for (const p of byPopularity.slice(0, limit)) {
-    if (selected && p !== selected && !neighbourSet.has(p)) continue;
+    if (selected && p !== selected && !near.has(p)) continue;
     label(p, false);
   }
 }
-const byPopularity = points.slice().sort((a, b) => b.popularity - a.popularity);
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, r);
+  ctx.fill();
+}
 
 // ---------- hit testing ----------
 
@@ -263,7 +415,7 @@ for (const p of points) {
 
 function pointAt(sx, sy) {
   const [wx, wy] = toWorld(sx, sy);
-  const reach = Math.max(1, Math.ceil(14 / view.scale / cellSize));
+  const reach = Math.max(1, Math.ceil(16 / view.scale / cellSize));
   const cx = Math.floor(wx / cellSize), cy = Math.floor(wy / cellSize);
   let best = null, bestD = Infinity;
   for (let dx = -reach; dx <= reach; dx++) {
@@ -271,7 +423,7 @@ function pointAt(sx, sy) {
       for (const p of grid.get((cx + dx) + "," + (cy + dy)) || []) {
         const [x, y] = toScreen(p.x, p.y);
         const d = Math.hypot(x - sx, y - sy);
-        if (d < Math.max(radius(p) + 4, 8) && d < bestD) { best = p; bestD = d; }
+        if (d < Math.max(radius(p) + 5, 9) && d < bestD) { best = p; bestD = d; }
       }
     }
   }
@@ -286,7 +438,7 @@ let pinchStart = null;
 
 function zoomAt(sx, sy, factor) {
   const [wx, wy] = toWorld(sx, sy);
-  view.scale = Math.min(40, Math.max(0.2, view.scale * factor));
+  view.scale = Math.min(homeScale * 40, Math.max(homeScale * 0.4, view.scale * factor));
   view.x = wx - (sx - width / 2) / view.scale;
   view.y = wy - (sy - height / 2) / view.scale;
   draw();
@@ -320,13 +472,12 @@ canvas.addEventListener("pointermove", e => {
   if (pointers.size === 2 && pinchStart) {
     const [a, b] = [...pointers.values()];
     const dist = Math.hypot(a.x - b.x, a.y - b.y);
-    const target = pinchStart.scale * dist / pinchStart.dist;
-    zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, target / view.scale);
+    zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, pinchStart.scale * dist / pinchStart.dist / view.scale);
     dragMoved = true;
     return;
   }
   const dx = now.x - prev.x, dy = now.y - prev.y;
-  if (Math.abs(dx) + Math.abs(dy) > 0) {
+  if (dx || dy) {
     if (Math.hypot(dx, dy) > 2) dragMoved = true;
     view.x -= dx / view.scale;
     view.y -= dy / view.scale;
@@ -351,7 +502,7 @@ canvas.addEventListener("pointerup", endPointer);
 canvas.addEventListener("pointercancel", endPointer);
 canvas.addEventListener("pointerleave", () => setHover(null));
 
-// ---------- tooltip ----------
+// ---------- hover card ----------
 
 const tooltip = document.getElementById("tooltip");
 
@@ -362,53 +513,61 @@ function setHover(p, e) {
     draw();
   }
   if (!p) { tooltip.style.display = "none"; return; }
-  tooltip.innerHTML = `<div class="name">${esc(p.title)}</div>
-    <div class="sub">${[p.year, fmt(p.format), p.score ? p.score + "%" : null].filter(Boolean).join(" · ")}</div>
-    <div class="sub">${esc(p.tags.slice(0, 4).join(", "))}</div>`;
-  tooltip.style.display = "block";
-  const tx = Math.min(e.clientX + 14, window.innerWidth - tooltip.offsetWidth - 8);
-  const ty = Math.min(e.clientY + 14, window.innerHeight - tooltip.offsetHeight - 8);
+  tooltip.innerHTML = `<img src="${esc(p.cover || "")}" alt="">
+    <div><div class="name">${esc(p.title)}</div>
+    <div class="sub">${esc(yearFormat(p))}${p.score ? `<span class="score ${tier(p.score)}">★ ${p.score}%</span>` : ""}</div>
+    <div class="sub">${esc(p.tags.slice(0, 3).join(", "))}</div></div>`;
+  tooltip.style.display = "flex";
+  const tx = Math.min(e.clientX + 16, window.innerWidth - tooltip.offsetWidth - 8);
+  const ty = Math.min(e.clientY + 16, window.innerHeight - tooltip.offsetHeight - 8);
   tooltip.style.left = tx + "px";
   tooltip.style.top = ty + "px";
 }
 
-// ---------- camera flight ----------
+// ---------- motion ----------
 
 let flight = null;
-function cancelFlight() { if (flight) { cancelAnimationFrame(flight); flight = null; } }
+function cancelFlight() { if (flight) { cancelAnimationFrame(flight); flight = null; reveal = 1; } }
+
+function animate(duration, step) {
+  cancelFlight();
+  if (reduceMotion) { step(1); render(); return; }
+  const start = performance.now();
+  const tick = now => {
+    const t = Math.min(1, (now - start) / duration);
+    step(t);
+    render();
+    flight = t < 1 ? requestAnimationFrame(tick) : null;
+  };
+  flight = requestAnimationFrame(tick);
+}
 
 function flyTo(x, y, scale) {
-  cancelFlight();
   const from = { ...view };
-  const start = performance.now();
-  const duration = 650;
-  const step = now => {
-    const t = Math.min(1, (now - start) / duration);
+  animate(700, t => {
     const k = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
     view.x = from.x + (x - from.x) * k;
     view.y = from.y + (y - from.y) * k;
     view.scale = Math.exp(Math.log(from.scale) + (Math.log(scale) - Math.log(from.scale)) * k);
-    render();
-    flight = t < 1 ? requestAnimationFrame(step) : null;
-  };
-  flight = requestAnimationFrame(step);
+    reveal = Math.max(0, (t - 0.35) / 0.65);
+  });
 }
 
-// Frame the selected show together with its neighbours, leaving room for the panel.
+// Frame the selected show with its closest matches, leaving room for the panel.
 function frameSelection(p) {
-  const group = [p, ...p.nn.slice(0, 10).map(i => points[i])];
+  const group = [p, ...p.nn.slice(0, 8).map(i => points[i])];
   const xs = group.map(q => q.x), ys = group.map(q => q.y);
-  const panelWidth = width > 700 ? 380 : 0;
-  const usableW = width - panelWidth - 80;
+  const panelW = width > 700 ? 400 : 0;
+  const panelH = width > 700 ? 0 : height * 0.72;
   const spanX = Math.max(40, Math.max(...xs) - Math.min(...xs));
   const spanY = Math.max(40, Math.max(...ys) - Math.min(...ys));
-  const scale = Math.min(12, Math.max(view.scale * 0.6, Math.min(usableW / spanX, (height - 120) / spanY)));
-  const cx = (Math.max(...xs) + Math.min(...xs)) / 2 + panelWidth / 2 / scale;
-  const cy = (Math.max(...ys) + Math.min(...ys)) / 2;
+  const scale = Math.min(homeScale * 12, Math.max(homeScale, Math.min((width - panelW - 120) / spanX, (height - panelH - 140) / spanY)));
+  const cx = (Math.max(...xs) + Math.min(...xs)) / 2 + panelW / 2 / scale;
+  const cy = (Math.max(...ys) + Math.min(...ys)) / 2 + panelH / 2 / scale;
   flyTo(cx, cy, scale);
 }
 
-// ---------- side panel ----------
+// ---------- panel ----------
 
 const panel = document.getElementById("panel");
 
@@ -416,8 +575,11 @@ function select(p, fly = true) {
   selected = p;
   input.value = p.title;
   renderPanel(p);
-  if (fly) frameSelection(p);
-  else draw();
+  if (fly) {
+    frameSelection(p);
+  } else {
+    animate(450, t => { reveal = t; });
+  }
 }
 
 function closePanel() {
@@ -427,39 +589,54 @@ function closePanel() {
 }
 
 function renderPanel(p) {
-  const alt = p.romaji && p.romaji !== p.title ? `<div class="alt">${esc(p.romaji)}</div>` : "";
-  const parts = p.parts > 1 ? ` · ${p.parts} entries in franchise` : "";
-  const sims = p.nn.map((i, rank) => {
+  const native = p.native && p.native !== p.title ? `<div class="native" lang="ja">${esc(p.native)}</div>` : "";
+  const facts = [
+    p.year,
+    fmt(p.format),
+    p.episodes ? `${p.episodes} episodes` : null,
+    p.parts > 1 ? `${p.parts} entries in the franchise` : null,
+  ].filter(Boolean).map(f => `<span>${esc(f)}</span>`).join("");
+  const cards = p.nn.map((i, rank) => {
     const q = points[i];
-    const pct = Math.round(Math.max(0, p.nnSim[rank]) * 100);
-    return `<div class="sim" data-i="${i}">
-      <img src="${q.cover || ""}" alt="" loading="lazy">
-      <div class="body">
-        <div class="name">${esc(q.title)}</div>
-        <div class="meta">${[q.year, fmt(q.format), q.score ? q.score + "%" : null].filter(Boolean).join(" · ")}</div>
-        <div class="bar"><span style="width:${pct}%"></span></div>
-      </div>
-    </div>`;
+    const pct = p.nnMatch[rank];
+    return `<button type="button" class="card" data-i="${i}" title="${esc(q.title)}">
+      <div class="poster"><img src="${esc(q.cover || "")}" alt="" loading="lazy"><span class="match">${pct}% match</span></div>
+      <div class="t">${esc(q.title)}</div>
+      <div class="y">${esc(yearFormat(q))}</div>
+    </button>`;
   }).join("");
 
   panel.innerHTML = `
     <button class="close" aria-label="Close">×</button>
+    <div class="banner" style="background-image:url('${esc(p.cover || "")}')"></div>
     <div class="hero">
-      <img src="${p.cover || ""}" alt="">
-      <div>
-        <h2>${esc(p.title)}</h2>${alt}
-        <div class="meta">${[p.year, fmt(p.format), p.episodes ? p.episodes + " eps" : null, p.score ? p.score + "% score" : null].filter(Boolean).join(" · ")}${parts}</div>
-        <div class="meta">${esc(p.studios.join(", "))}</div>
-        <div class="meta" style="margin-top:6px"><a href="${p.url}" target="_blank" rel="noopener">View on AniList ↗</a></div>
-      </div>
+      <img src="${esc(p.cover || "")}" alt="">
+      <div class="text"><h2>${esc(p.title)}</h2>${native}</div>
     </div>
-    <div class="chips">${p.genres.map(g => `<span class="chip">${esc(g)}</span>`).join("")}${p.tags.map(t => `<span class="chip" style="opacity:.7">${esc(t)}</span>`).join("")}</div>
-    <div class="section">Similar shows</div>
-    ${sims}`;
+    <div class="about">
+      <div class="facts">${p.score ? `<span class="score ${tier(p.score)}">★ ${p.score}%</span>` : ""}${facts}</div>
+      ${p.studios.length ? `<div class="studio">Made by ${esc(p.studios.join(", "))}</div>` : ""}
+      ${p.synopsis ? `<div class="synopsis"><p>${esc(p.synopsis)}</p><button type="button" class="more">Read more</button></div>` : ""}
+      <div class="chips">${p.genres.map(g => `<span class="chip">${esc(g)}</span>`).join("")}${p.tags.map(t => `<span class="chip tag">${esc(t)}</span>`).join("")}</div>
+      <a class="anilist" href="${esc(p.url)}" target="_blank" rel="noopener">Open on AniList</a>
+    </div>
+    <div class="watchnext">Watch next<small>The 20 shows most like this one</small></div>
+    <div class="grid">${cards}</div>`;
   panel.classList.add("open");
   panel.scrollTop = 0;
   panel.querySelector(".close").onclick = closePanel;
-  panel.querySelectorAll(".sim").forEach(el => el.onclick = () => select(points[+el.dataset.i]));
+  const synopsis = panel.querySelector(".synopsis");
+  if (synopsis) {
+    const more = synopsis.querySelector(".more");
+    const text = synopsis.querySelector("p");
+    // Only offer "Read more" when the text is actually cut off.
+    if (text.scrollHeight <= text.clientHeight + 2) more.remove();
+    else more.onclick = () => {
+      const open = synopsis.classList.toggle("open");
+      more.textContent = open ? "Show less" : "Read more";
+    };
+  }
+  panel.querySelectorAll(".card").forEach(el => el.onclick = () => select(points[+el.dataset.i]));
 }
 
 // ---------- fuzzy search ----------
@@ -482,7 +659,7 @@ function trigrams(s) {
 const index = [];
 points.forEach((p, i) => {
   const seen = new Set();
-  for (const t of [p.title, p.romaji, ...p.titles]) {
+  for (const t of [p.title, p.romaji, p.native, ...p.titles]) {
     if (!t) continue;
     const n = norm(t);
     if (!n || seen.has(n)) continue;
@@ -539,16 +716,16 @@ function showResults() {
   current = search(input.value);
   active = 0;
   if (!current.length) {
-    results.innerHTML = input.value.trim() ? `<div class="result"><span class="sub">No match. Try another title or spelling.</span></div>` : "";
+    results.innerHTML = input.value.trim() ? `<div class="empty">Nothing matches that yet. Try the English or Japanese title, or a shorter spelling.</div>` : "";
     results.classList.toggle("open", !!input.value.trim());
     return;
   }
   results.innerHTML = current.map((r, k) => {
-    const via = norm(r.via) !== norm(r.p.title) && norm(r.via) !== norm(r.p.romaji) ? `matched “${esc(r.via)}”` : esc(r.p.romaji !== r.p.title ? r.p.romaji : "");
-    return `<div class="result${k === 0 ? " active" : ""}" data-k="${k}">
-      <img src="${r.p.cover || ""}" alt="" loading="lazy">
+    const alt = norm(r.via) !== norm(r.p.title) && norm(r.via) !== norm(r.p.romaji) ? `matched “${r.via}”` : (r.p.romaji !== r.p.title ? r.p.romaji : "");
+    return `<div class="result${k === 0 ? " active" : ""}" data-k="${k}" role="option">
+      <img src="${esc(r.p.cover || "")}" alt="" loading="lazy">
       <div><div class="name">${esc(r.p.title)}</div>
-      <div class="sub">${[r.p.year, fmt(r.p.format)].filter(Boolean).join(" · ")}${via ? " · " + via : ""}</div></div>
+      <div class="sub">${esc(yearFormat(r.p))}${alt ? `, ${esc(alt)}` : ""}</div></div>
     </div>`;
   }).join("");
   results.classList.add("open");
@@ -558,14 +735,13 @@ function showResults() {
 function choose(k) {
   const r = current[k];
   if (!r) return;
-  input.value = r.p.title;
   results.classList.remove("open");
   input.blur();
   select(r.p);
 }
 
 input.addEventListener("input", showResults);
-input.addEventListener("focus", () => { if (input.value.trim()) showResults(); });
+input.addEventListener("focus", () => { if (input.value.trim() && !selected) showResults(); });
 input.addEventListener("keydown", e => {
   const items = results.querySelectorAll(".result[data-k]");
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -581,10 +757,10 @@ input.addEventListener("keydown", e => {
   }
 });
 document.addEventListener("pointerdown", e => {
-  if (!document.getElementById("search").contains(e.target)) results.classList.remove("open");
+  if (!document.getElementById("top").contains(e.target)) results.classList.remove("open");
 });
 document.addEventListener("keydown", e => {
-  if (e.key === "/" && document.activeElement !== input) { e.preventDefault(); input.focus(); }
+  if (e.key === "/" && document.activeElement !== input) { e.preventDefault(); input.focus(); input.select(); }
   if (e.key === "Escape" && document.activeElement !== input && selected) closePanel();
 });
 
@@ -596,11 +772,19 @@ function esc(s) {
 function fmt(f) {
   return { TV: "TV", TV_SHORT: "TV short", MOVIE: "Movie", OVA: "OVA", ONA: "ONA", SPECIAL: "Special", MUSIC: "Music" }[f] || f;
 }
+function yearFormat(p) {
+  return [p.year, fmt(p.format)].filter(Boolean).join(" ");
+}
+function tier(score) {
+  return score >= 82 ? "top" : score >= 72 ? "good" : "ok";
+}
 
 window.addEventListener("resize", resize);
 resize();
 fitAll();
-draw();
+applySize();
+// Canvas text uses the web font only once it has loaded.
+if (document.fonts) document.fonts.ready.then(draw);
 </script>
 </body>
 </html>
